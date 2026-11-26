@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>ScratchQ in a simulated STACK frame</title>
+<!--
+  The question as STACK runs it: mountStackJs with a stand-in for stack_js (two inputs, resize_containing_frame).
+  The configuration comes from the builder (examples/sum-1-to-n.scratchq). Checks the frame's height and how soon
+  the score input is filled after an edit (the student may press Check right away).
+    node tests/run-page.mjs tests/stack-sim.html 120
+-->
+<script src="https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js"></script>
+<script src="../scratchq.js"></script>
+<script src="../scratchq-editor.js"></script>
+<script src="../scratchq-question.js"></script>
+<style>body { margin: 0; font-family: sans-serif; }</style>
+</head>
+<body>
+<div id="scratchq"></div>
+<div hidden><input id="in_ans1"><input id="in_ans2"></div>
+<script type="module">
+const out = { passed: 0, failed: 0, lines: [] };
+function ok(cond, name, detail) {
+    if (cond) out.passed += 1; else out.failed += 1;
+    out.lines.push((cond ? "ok   " : "FAIL ") + name + (detail === undefined ? "" : "  -> " + (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 600)));
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function until(cond, ms) { const t = Date.now(); while (Date.now() - t < ms) { if (cond()) return true; await sleep(20); } return false; }
+try {
+    /* the configuration as the builder makes it */
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:absolute;left:-5000px;width:1200px;height:800px";
+    frame.src = "../scratch-question-builder.html";
+    document.body.appendChild(frame);
+    await until(() => frame.contentWindow.builder && frame.contentWindow.builder.editors.ref, 20000);
+    const B = frame.contentWindow.builder;
+    const ex = await (await fetch("../examples/sum-1-to-n.scratchq", { cache: "no-store" })).json();
+    B.loadState(ex, "sum-1-to-n.scratchq", null);
+    await sleep(1500);
+    const cfg = JSON.parse(JSON.stringify(B.questionConfig()));
+    frame.remove();
+
+    const heights = [];
+    const changes = { ans1: [], ans2: [] };
+    const t0 = { v: 0 };
+    ["ans1", "ans2"].forEach(n => document.getElementById("in_" + n).addEventListener("change", e => changes[n].push({ t: Date.now() - t0.v, v: e.target.value.slice(0, 20) })));
+    const stackJs = {
+        request_access_to_input: name => Promise.resolve("in_" + name),
+        resize_containing_frame: (w, h) => heights.push(parseInt(h, 10)),
+        display_error: m => out.lines.push("display_error: " + m)
+    };
+    const api = await ScratchQ.Question.mountStackJs(stackJs, cfg);
+    await sleep(1500);
+    const h = heights[heights.length - 1];
+    const edH = document.querySelector("#scratchq .injectionDiv, #scratchq .blocklySvg").getBoundingClientRect().height;
+    let oldBottom = 0;
+    for (const e of document.body.getElementsByTagName("*")) { const r = e.getBoundingClientRect(); if (r.width && r.height && r.bottom > oldBottom) oldBottom = r.bottom; }
+    out.lines.push("(every element counted, as before: " + Math.ceil(oldBottom + 12) + " px)");
+    ok(h > edH && h < edH + 120, "the frame's height follows the editor (" + h + " px; editor " + Math.round(edH) + " px)", heights);
+
+    /* a wrong edit: the repeat's (n - 1) -> (n - 2); time until the score input is filled */
+    const ws = api.editor.workspace;
+    const rep = ws.getAllBlocks(false).find(b => b.type === "control_repeat");
+    const minus = rep.getInputTargetBlock("TIMES");
+    const num = minus.getInputTargetBlock("NUM2");
+    t0.v = Date.now();
+    num.setFieldValue("2", "NUM");
+    await until(() => changes.ans1.length, 8000);
+    ok(changes.ans1.length && changes.ans1[0].v === "0", "a wrong edit: score 0 (after " + (changes.ans1[0] && changes.ans1[0].t) + " ms)", changes);
+    ok(/^sq1:/.test(document.getElementById("in_ans2").value), "a wrong edit: the state is saved");
+    const st = ScratchQ.parseState(document.getElementById("in_ans2").value);
+    out.lines.push("feedback: " + (st && st.feedback));
+
+    /* a second edit: the reference's outputs are known now */
+    changes.ans1.length = 0;
+    t0.v = Date.now();
+    num.setFieldValue("3", "NUM");
+    await until(() => changes.ans2.length > 1, 8000);
+    out.lines.push("second edit saved after " + (changes.ans2[changes.ans2.length - 1].t) + " ms");
+} catch (e) {
+    ok(false, "exception: " + (e && e.stack || e));
+}
+window.__result = out;
+window.__done = true;
+</script>
+</body>
+</html>

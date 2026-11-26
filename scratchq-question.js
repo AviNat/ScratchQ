@@ -291,15 +291,30 @@ function mountStackJs(stackJs, cfg) {
     });
 }
 
-/* the frame follows its content (as the math question): the bottom of every element shown */
+/*
+ * The frame follows its content (as the math question): the bottom of every element shown. An element that clips
+ * its content (overflow hidden / scroll, an <svg>) counts by its own box only: the palette's blocks scrolled out of
+ * sight are far below the editor, and counting them made the frame as tall as the whole palette.
+ */
 function fitFrame(stackJs) {
     let last = 0, pending = false;
+    function clips(e) {
+        if (e instanceof SVGElement) return true;
+        const s = global.getComputedStyle(e);
+        return s.display === "none" || (s.overflowY && s.overflowY !== "visible");
+    }
+    function bottomOf(e, bottom) {
+        const r = e.getBoundingClientRect();
+        if (r.width && r.height && r.bottom > bottom) bottom = r.bottom;
+        if (clips(e)) return bottom;
+        for (let c = e.firstElementChild; c; c = c.nextElementSibling) bottom = bottomOf(c, bottom);
+        return bottom;
+    }
     function needed() {
         let bottom = 0;
-        const all = document.body.getElementsByTagName("*");
-        for (let i = 0; i < all.length; i += 1) {
-            const r = all[i].getBoundingClientRect();
-            if (r.width && r.height && r.bottom > bottom) bottom = r.bottom;
+        for (let c = document.body.firstElementChild; c; c = c.nextElementSibling) {
+            if (c.tagName === "SCRIPT" || c.tagName === "STYLE") continue;
+            bottom = bottomOf(c, bottom);
         }
         return Math.ceil(bottom + (global.scrollY || 0) + 12);
     }
