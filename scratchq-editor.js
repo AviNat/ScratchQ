@@ -32,6 +32,9 @@ if (!ScratchQ) throw new Error("scratchq-editor.js needs scratchq.js");
 const SCRATCH_BLOCKS_VERSION = "2.2.16";
 const SCRATCH_BLOCKS_URL = "https://cdn.jsdelivr.net/npm/scratch-blocks@" + SCRATCH_BLOCKS_VERSION + "/dist/main.mjs";
 const MEDIA_URL = "https://cdn.jsdelivr.net/npm/scratch-blocks@" + SCRATCH_BLOCKS_VERSION + "/media/";
+/* the blocks' size: Scratch's (0.675) zoomed in twice with the + button (x 1.2 each) - easier to read in a question */
+const ZOOM_STEP = 1.2;
+const DEFAULT_ZOOM = 0.675 * ZOOM_STEP * ZOOM_STEP;
 
 /* ============================================================
    THE BLOCKS OF THE LANGUAGE (v1 + the ones planned next), by category, with the palette's default inputs
@@ -271,12 +274,34 @@ function create(element, opts) {
         trashcan: false,
         sounds: false,
         comments: !readOnly,
-        zoom: { controls: true, wheel: true, startScale: opts.zoom || 0.675 },
+        zoom: { controls: true, wheel: true, startScale: opts.zoom || DEFAULT_ZOOM, scaleSpeed: ZOOM_STEP },
         grid: { spacing: 40, length: 2, colour: "#ddd" },
         move: { scrollbars: true, drag: true, wheel: false },
         scratchTheme: "classic"
     });
     if (!readOnly) workspace.registerToolboxCategoryCallback("VARIABLE", SB.ScratchVariables.getVariablesCategory);
+
+    /*
+     * The palette: scratch-blocks draws it at a fixed size (scale 0.675, 250 px wide) whatever the zoom. Here it has
+     * the blocks' starting size, its width in proportion; the + / - buttons zoom the scripts only, as in Scratch.
+     */
+    const startScale = opts.zoom || DEFAULT_ZOOM;
+    const paletteFlyout = !readOnly && workspace.getFlyout && workspace.getFlyout();
+    if (paletteFlyout) {
+        paletteFlyout.getFlyoutScale = function () { return startScale; };
+        paletteFlyout.getWidth = function () { return Math.round(250 * startScale / 0.675); };
+    }
+
+    /* the program's top-left corner at the top-left of the view (centring a tall program hides its first blocks) */
+    function scrollToStart() {
+        if (!workspace.getTopBlocks(false).length) return;
+        try {
+            const c = workspace.getMetricsManager().getContentMetrics();
+            workspace.scroll(-(c.left - 24), -(c.top - 24));
+        } catch (e) {
+            if (workspace.scrollCenter) workspace.scrollCenter();
+        }
+    }
 
     const vm = new VM();
     let loading = false, changeTimer = null, undoing = false;
@@ -322,14 +347,14 @@ function create(element, opts) {
             const dom = SB.utils.xml.textToDom(data.xml);
             SB.clearWorkspaceAndLoadFromXml(dom, workspace);
             applyLocks();
-            workspace.scrollCenter && workspace.scrollCenter();
+            scrollToStart();
         } finally {
             /* Blockly fires the load's events a moment later (a timeout): they are not a change by the user */
             setTimeout(function () {
                 loading = false;
                 workspace.clearUndo && workspace.clearUndo();
                 lastKey = ScratchQ.programKey(programFromVm(vm));
-                refreshPalette();
+                refreshPalette(true);
                 if (loadDone) { const done = loadDone; loadDone = null; done(); }
             }, 0);
         }
@@ -346,15 +371,19 @@ function create(element, opts) {
      * variable). scratch-blocks draws the palette once and does not redraw it by itself (the Scratch GUI calls
      * forceRerender): after a load and after a variable is made, renamed or deleted.
      */
-    let paletteTimer = null;
-    function refreshPalette() {
+    let paletteTimer = null, scrollPending = false;
+    function refreshPalette(scroll) {
         if (readOnly) return;
+        if (scroll) scrollPending = true;
         clearTimeout(paletteTimer);
         paletteTimer = setTimeout(function () {
             const tb = workspace.getToolbox && workspace.getToolbox();
             if (!tb || workspace.isDisposed && workspace.isDisposed()) return;
             if (typeof tb.forceRerender === "function") tb.forceRerender();
             else if (typeof tb.refreshSelection === "function") tb.refreshSelection();
+            /* the palette's width may have changed: the scripts' area again, then the program's start in view */
+            SB.svgResize(workspace);
+            if (scrollPending) { scrollPending = false; scrollToStart(); }
         }, 0);
     }
     const VAR_EVENTS = { var_create: true, var_rename: true, var_delete: true };
