@@ -212,6 +212,9 @@ function runQuestion(host, cfg, adapter) {
                 checker.grade(p, lang).then(function (g) {
                     if (mine !== seq) return;                        // a newer change is being graded
                     adapter.save({ v: 1, program: p, grade: g.grade, feedback: g.feedback }, g.grade / 100);
+                }).catch(function (e) {
+                    /* nothing is saved: the inputs keep their last values */
+                    if (global.console) console.error("[ScratchQ] grading failed:", e);
                 });
             }, 400);
         }
@@ -267,21 +270,30 @@ function mountStackJs(stackJs, cfg) {
         if (!name) return Promise.resolve(null);
         return Promise.resolve(stackJs.request_access_to_input(name, false, true)).then(function (id) { return document.getElementById(id); });
     }
-    function put(e, value) {
-        if (!e || e.value === value) return;
+    /* the console shows what goes into STACK's inputs (to follow the saving in Moodle) */
+    function log() {
+        if (global.console) console.log.apply(console, ["[ScratchQ]"].concat(Array.prototype.slice.call(arguments)));
+    }
+    function put(e, value, name) {
+        if (!e) { log(name + ": no such input - not saved"); return; }
+        if (e.value === value) { log(name + " unchanged:", JSON.stringify(value.length > 60 ? value.slice(0, 60) + "... (" + value.length + " chars)" : value)); return; }
         e.value = value;
         e.dispatchEvent(new Event("change"));
+        log(name + " =", JSON.stringify(value.length > 60 ? value.slice(0, 60) + "... (" + value.length + " chars)" : value));
     }
     return Promise.all([access(names.score), access(names.state)]).then(function (els) {
         const scoreEl = els[0], stateEl = els[1];
         const review = [scoreEl, stateEl].some(function (e) { return e && (e.readOnly || e.disabled); });
+        log("library " + VERSION + "; inputs " + names.score + " = " + JSON.stringify(scoreEl ? scoreEl.value : null) +
+            ", " + names.state + ": " + (stateEl ? stateEl.value.length + " chars" : "missing") + "; review: " + review);
         fitFrame(stackJs);
         return runQuestion(host, cfg, {
             state: stateEl ? stateEl.value : null,
             review: review,
             save: function (state, score) {
-                put(stateEl, state ? ScratchQ.encodeState(state) : "");
-                put(scoreEl, state ? scoreText(score) : "");
+                log(state ? "graded: " + state.grade + "%" : "no answer (the starting program, or nothing)");
+                put(stateEl, state ? ScratchQ.encodeState(state) : "", names.state);
+                put(scoreEl, state ? scoreText(score) : "", names.score);
             }
         });
     }).catch(function (e) {
