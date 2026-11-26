@@ -49,7 +49,14 @@ try {
         resize_containing_frame: (w, h) => heights.push(parseInt(h, 10)),
         display_error: m => out.lines.push("display_error: " + m)
     };
+    /* the logs are off unless the question asks for them */
+    const logged = [], realLog = console.log;
+    console.log = function () { logged.push(Array.from(arguments).join(" ")); realLog.apply(console, arguments); };
+    ScratchQ.log("hidden");
+    ok(ScratchQ.DEBUG === false && !logged.length, "DEBUG is off by default: nothing logged");
+    cfg.debug = true;                                    // the builder's "Console logs" option
     const api = await ScratchQ.Question.mountStackJs(stackJs, cfg);
+    ok(ScratchQ.DEBUG === true && logged.some(l => /^\[ScratchQ\] library /.test(l)), "debug: true in the configuration turns the logs on", logged.slice(0, 2));
     await sleep(1500);
     const h = heights[heights.length - 1];
     const edH = document.querySelector("#scratchq .injectionDiv, #scratchq .blocklySvg").getBoundingClientRect().height;

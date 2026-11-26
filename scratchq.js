@@ -515,8 +515,20 @@ function parseState(text) {
     } catch (e) { return null; }
 }
 
+/*
+ * DEBUG: true writes the steps of a question (the edits, the grading, what is saved in the inputs) to the console,
+ * prefixed [ScratchQ]. Off by default. Set ScratchQ.DEBUG = true in the console, or "debug": true in a question's
+ * configuration (the builder's "Console logs" option). Errors are written to the console in any case.
+ */
+function log() {
+    if (!ScratchQ.DEBUG || !global.console) return;
+    console.log.apply(console, ["[ScratchQ]"].concat(Array.prototype.slice.call(arguments)));
+}
+
 const ScratchQ = {
     version: VERSION,
+    DEBUG: false,
+    log: log,
     emptyProgram: emptyProgram,
     toProject: toProject,
     seededRandom: seededRandom,

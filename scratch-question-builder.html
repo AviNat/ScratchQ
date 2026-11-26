@@ -269,6 +269,9 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <div class="row">
     <label class="field">Library folder (scratchq.js, scratchq-editor.js, scratchq-question.js)<input type="url" id="libraryUrl" style="width:min(560px,90vw);direction:ltr"></label>
   </div>
+  <div class="row">
+    <label class="check"><input type="checkbox" id="debugLogs"> Console logs (DEBUG) - the question writes its steps to the browser's console (F12), to find a problem in Moodle; leave off for students</label>
+  </div>
   <div id="issues"></div>
 </section>
 <section>
@@ -1064,6 +1067,7 @@ function readQuestionSettings() {
     q.inputs = { score: $("inputScore").value.trim() || "ans1", state: $("inputState").value.trim() || "ans2" };
     q.review = { grade: $("reviewGrade").checked, feedback: $("reviewFeedback").checked, reference: $("reviewReference").checked };
     q.libraryUrl = $("libraryUrl").value.trim() || DEFAULT_LIBRARY;
+    q.debug = $("debugLogs").checked;
     return q;
 }
 function writeQuestionSettings() {
@@ -1076,6 +1080,7 @@ function writeQuestionSettings() {
     $("reviewFeedback").checked = q.review.feedback !== false;
     $("reviewReference").checked = q.review.reference !== false;
     $("libraryUrl").value = q.libraryUrl;
+    $("debugLogs").checked = q.debug === true;
 }
 function libraryFile(name) { return state.question.libraryUrl.replace(/\/*$/, "/") + name; }
 
@@ -1086,6 +1091,7 @@ function questionConfig() {
     const cfg = { tool: QUESTION_TOOL, formatVersion: 1, questionId: q.questionId, language: state.language, kind: state.kind,
         review: q.review, reference: c.reference, height: state.height };
     if (q.target === "stack") cfg.inputs = q.inputs;
+    if (q.debug === true) cfg.debug = true;
     if (state.kind === "trace") { cfg.tests = c.tests.slice(0, 1); cfg.trace = c.trace; }
     else {
         cfg.initial = c.initial; cfg.locks = c.locks; cfg.palette = c.palette; cfg.tests = c.tests; cfg.observe = c.observe;

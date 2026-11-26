@@ -86,13 +86,12 @@ function showFeedback(box, cfg, saved, lang) {
  * host - an element; cfg - the configuration; adapter - { state, review, save(state, score) }.
  * Returns a promise of { editor?, grade() }.
  */
-/* the steps from an edit to the saving, in the console (to follow a question in Moodle) */
-function debug(text) {
-    if (global.console) console.log("[ScratchQ] " + text);
-}
+/* the steps from an edit to the saving, in the console when ScratchQ.DEBUG is on (to follow a question in Moodle) */
+function debug() { ScratchQ.log.apply(null, arguments); }
 
 function runQuestion(host, cfg, adapter) {
     adapter = adapter || {};
+    if (cfg.debug === true) ScratchQ.DEBUG = true;               // the builder's "Console logs" option
     const lang = studentLanguage(cfg);
     const ui = UI[lang] || UI.en;
     const review = adapter.review === true;
@@ -251,7 +250,7 @@ function runQuestion(host, cfg, adapter) {
             editorApi = editor;
             debug("the editor is ready (" + editor.workspace.getAllBlocks(false).length + " blocks)" + (review ? " - review" : ""));
             /* every edit's event (not the clicks and scrolling): shows whether the edits reach the editor */
-            if (!review) editor.workspace.addChangeListener(function (e) { if (!e.isUiEvent) debug("edit event: " + e.type); });
+            if (!review) editor.workspace.addChangeListener(function (e) { if (ScratchQ.DEBUG && !e.isUiEvent) debug("edit event: " + e.type); });
             const api = { editor: editor, grade: function () { return checker.grade(editor.getProgram(), lang); } };
             if (!review) return api;
             const box = el("div");
@@ -289,6 +288,7 @@ function scoreText(score) {
 }
 
 function mountStackJs(stackJs, cfg) {
+    if (cfg.debug === true) ScratchQ.DEBUG = true;
     const names = cfg.inputs || { score: "ans1", state: "ans2" };
     let host = document.getElementById(cfg.hostId || "scratchq");
     if (!host) {
@@ -300,10 +300,8 @@ function mountStackJs(stackJs, cfg) {
         if (!name) return Promise.resolve(null);
         return Promise.resolve(stackJs.request_access_to_input(name, false, true)).then(function (id) { return document.getElementById(id); });
     }
-    /* the console shows what goes into STACK's inputs (to follow the saving in Moodle) */
-    function log() {
-        if (global.console) console.log.apply(console, ["[ScratchQ]"].concat(Array.prototype.slice.call(arguments)));
-    }
+    /* what goes into STACK's inputs (ScratchQ.DEBUG) */
+    const log = debug;
     function put(e, value, name) {
         if (!e) { log(name + ": no such input - not saved"); return; }
         if (e.value === value) { log(name + " unchanged:", JSON.stringify(value.length > 60 ? value.slice(0, 60) + "... (" + value.length + " chars)" : value)); return; }
