@@ -32,6 +32,27 @@ try {
     ok(Object.keys(B.state.locks).length === 1, "the lock of the example");
     ok(!document.querySelector("nav.tabs button.has-issue"), "no tab has an issue", Array.from(document.querySelectorAll("nav.tabs button.has-issue")).map(b => b.id));
 
+    /* a variable no block uses: made, then deleted - "What is checked" and the tests follow */
+    const refWs = B.editors.ref.workspace;
+    const hasTmp = () => !!$("observeBox").querySelector("input[data-name=tmp]") && !!$("testsBox").querySelector("input[data-f=var][data-name=tmp]");
+    refWs.createVariable("tmp", "", "vtmp");
+    ok(await until(hasTmp, 3000), "a new variable appears in what is checked and in the tests");
+    refWs.deleteVariableById("vtmp");
+    ok(await until(() => !$("observeBox").querySelector("input[data-name=tmp]") && !$("testsBox").querySelector("input[data-name=tmp]"), 3000),
+        "a deleted variable (no block uses it) leaves what is checked and the tests");
+    /* the refresh button reads the reference again */
+    $("refreshTests").click();
+    await sleep(500);
+    ok(/says:\n\s+The sum is 6/.test($("testExp0").textContent), "↻ Refresh: the reference's outputs again", $("testExp0").textContent);
+    /* delete a test: the button on each card (a test added, then deleted) */
+    const nTests = B.state.tests.length;
+    $("addTest").click();
+    await sleep(200);
+    $("testsBox").querySelectorAll("button[data-del]")[nTests].click();
+    await sleep(200);
+    ok(B.state.tests.length === nTests && $("testsBox").querySelectorAll(".card").length === nTests, "🗑 Delete test removes the test", B.state.tests.length);
+    await B.runChecks();
+
     /* the attempt starts from the starting program: not an answer */
     await until(() => B.editors.attempt);
     await sleep(600);

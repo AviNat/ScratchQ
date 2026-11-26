@@ -162,7 +162,8 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <h2>What is checked</h2>
   <p class="hint">The outputs compared with the reference's. Numbers are compared by value (5 = 5.0).</p>
   <div id="observeBox"></div>
-  <label class="check"><input type="checkbox" id="caseSensitive"> <span>Upper and lower case must match (Scratch's "=" ignores case)</span></label>
+  <label class="check"><input type="checkbox" id="caseSensitive"> <span>Upper and lower case must match when the student's outputs are compared with the reference's (what the sprite says, the values).
+    This does not change the program: Scratch's "=" inside the program always ignores case ("monkey" = "Monkey" is true).</span></label>
 </section>
 
 <section id="traceSection" hidden>
@@ -176,7 +177,8 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
 </section>
 
 <section id="testsSection">
-  <h2>Tests <button type="button" class="small" id="addTest">+ Add a test</button></h2>
+  <h2>Tests <button type="button" class="small" id="addTest">+ Add a test</button>
+    <button type="button" class="small" id="refreshTests" title="Read the reference program again: its variables and lists, the tests' fields and the reference's outputs">↻ Refresh from the program</button></h2>
   <p class="hint">Each test runs the program once: from the green flag, with these values. Empty values: the program's own. A hidden test is graded but its details are not shown to the student.</p>
   <div class="cards" id="testsBox"></div>
   <p class="hint">The grade: the share of the tests passed (each test counts the same). A teacher mistake (tab 3) can set another grade.</p>
@@ -517,6 +519,11 @@ function referenceChanged(program) {
     state.observe.lists = state.observe.lists.filter(n => ln.indexOf(n) >= 0);
     state.trace.items = state.trace.items.filter(it => it.kind === "say" || (it.kind === "var" ? vn : ln).indexOf(it.name) >= 0);
     if (!state.trace.items.length) state.trace.items = [{ kind: "say" }];
+    /* the tests' values of variables / lists that no longer exist */
+    state.tests.forEach(t => {
+        if (t.vars) Object.keys(t.vars).forEach(n => { if (vn.indexOf(n) < 0) delete t.vars[n]; });
+        if (t.lists) Object.keys(t.lists).forEach(n => { if (ln.indexOf(n) < 0) delete t.lists[n]; });
+    });
     renderObserve();
     renderTests();
     renderTraceSection();
@@ -580,7 +587,8 @@ function renderTests() {
         card.innerHTML =
             "<div class=\"card-head\"><b>Test <input type=\"text\" data-f=\"name\" data-i=\"" + i + "\" value=\"" + esc(t.name || "") + "\" style=\"width:140px\"></b>" +
             "<label class=\"check\"><input type=\"checkbox\" data-f=\"hidden\" data-i=\"" + i + "\"" + (t.hidden ? " checked" : "") + "> hidden</label>" +
-            (state.tests.length > 1 ? "<button type=\"button\" class=\"small\" data-del=\"" + i + "\">Remove</button>" : "") + "</div>" +
+            "<button type=\"button\" class=\"small\" data-del=\"" + i + "\"" + (state.tests.length > 1 ? " title=\"Delete this test\"" : " disabled title=\"A question needs at least one test\"") +
+            ">🗑 Delete test</button></div>" +
             "<div class=\"test-grid\"><div>" + testInputsHtml(t, i) + "</div>" +
             "<div><div class=\"hint\" style=\"margin:0 0 3px\">The reference gives:</div><div class=\"expected\" id=\"testExp" + i + "\">…</div></div></div>";
         box.appendChild(card);
@@ -604,12 +612,18 @@ function readTestField(e) {
 $("testsBox").addEventListener("input", e => { if (readTestField(e)) changed(); });
 $("testsBox").addEventListener("change", e => { if (readTestField(e)) changed(); });
 $("testsBox").addEventListener("click", e => {
-    const d = e.target.dataset && e.target.dataset.del;
-    if (d === undefined) return;
+    const btn = e.target.closest && e.target.closest("button[data-del]");
+    const d = btn && btn.dataset.del;
+    if (d === undefined || d === null || state.tests.length < 2) return;
     state.tests.splice(Number(d), 1);
     renderTests();
     changed();
 });
+/* the reference read again from its editor: what is checked, the tests' fields, the outputs */
+$("refreshTests").onclick = async () => {
+    if (editors.ref) { editors.ref.flush(); referenceChanged(editors.ref.getProgram()); }
+    await runChecks();
+};
 $("addTest").onclick = () => {
     const last = state.tests[state.tests.length - 1] || {};
     state.tests.push({ name: String(state.tests.length + 1), vars: {}, lists: {}, answers: (last.answers || []).slice(), seed: (Number(last.seed) || 0) + 1, hidden: false });

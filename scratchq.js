@@ -218,7 +218,10 @@ function run(program, test, opts) {
 /* ============================================================
    COMPARING PROGRAMS (the untouched starting program is not an answer)
    ============================================================ */
-/* the blocks without positions and comments, in a stable order - two programs are the same when this is */
+/*
+ * The blocks without positions and comments, and the variables and lists (a variable made or deleted is a change,
+ * also when no block uses it), in a stable order - two programs are the same when this is.
+ */
 function programKey(program) {
     if (!program) return "";
     const blocks = program.blocks || {};
@@ -228,7 +231,10 @@ function programKey(program) {
         if (Array.isArray(b)) { clean[id] = b.slice(0, 3); return; }        // a top-level variable / list reporter
         clean[id] = { o: b.opcode, n: b.next, p: b.parent, i: b.inputs, f: b.fields, s: !!b.shadow, m: b.mutation || null };
     });
-    return JSON.stringify(clean);
+    function byId(a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; }
+    const vars = (program.variables || []).map(function (v) { return [v.id, v.name, String(v.value)]; }).sort(byId);
+    const lists = (program.lists || []).map(function (l) { return [l.id, l.name, (l.items || []).map(String)]; }).sort(byId);
+    return JSON.stringify({ b: clean, v: vars, l: lists });
 }
 function sameProgram(a, b) { return programKey(a) === programKey(b); }
 
