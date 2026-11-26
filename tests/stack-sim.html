@@ -77,6 +77,24 @@ try {
     num.setFieldValue("3", "NUM");
     await until(() => changes.ans2.length > 1, 8000);
     out.lines.push("second edit saved after " + (changes.ans2[changes.ans2.length - 1].t) + " ms");
+
+    /*
+     * Typing in a field and pressing Check at once (the bug found in Moodle): the field is still open, the frame loses
+     * the focus. (n - 3) -> (n - 0) is the correct program: the score must be 1 without closing the field.
+     */
+    changes.ans1.length = 0;
+    num.getField("NUM").showEditor();
+    await sleep(100);
+    const html = document.querySelector(".blocklyWidgetDiv input");
+    ok(!!html, "a field editor is open");
+    t0.v = Date.now();
+    html.value = "0";
+    html.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(30);                                     // Blockly fires its events a moment later
+    window.dispatchEvent(new Event("blur"));
+    await until(() => changes.ans1.length, 3000);
+    ok(changes.ans1.length && changes.ans1[0].v === "1", "typed, the field still open, Check pressed: score 1 after " + (changes.ans1[0] && changes.ans1[0].t) + " ms", changes.ans1);
+    ok(!!document.querySelector(".blocklyWidgetDiv input"), "(the field was still open)");
 } catch (e) {
     ok(false, "exception: " + (e && e.stack || e));
 }

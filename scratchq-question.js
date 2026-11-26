@@ -34,7 +34,7 @@
 const ScratchQ = global.ScratchQ;
 if (!ScratchQ || !ScratchQ.Editor) throw new Error("scratchq-question.js needs scratchq.js and scratchq-editor.js");
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 const UI = {
     en: { answerHere: "Your answer:", sayHint: "One line for each thing the sprite says, in order. The same thing several times in a row: [10] Hello", listHint: "One item per line.",
           yourProgram: "Your program:", loading: "Loading…" },
@@ -206,33 +206,49 @@ function runQuestion(host, cfg, adapter) {
         const program = saved && saved.program ? saved.program : initial;
         const edBox = el("div");
         host.appendChild(edBox);
-        let timer = null, seq = 0;
+        let timer = null, seq = 0, pending = null;
         function changed(p) {
             debug("the program changed (" + Object.keys(p.blocks || {}).length + " blocks)" + (review ? " - review, not saved" : !adapter.save ? " - nothing to save to" : ""));
             if (review || !adapter.save) return;
             clearTimeout(timer);
-            timer = setTimeout(function () {
-                /* the starting program untouched (or put back as it was) is not an answer */
-                if (ScratchQ.sameProgram(p, initial)) { adapter.save(null, 0); return; }
-                const mine = seq += 1, start = Date.now();
-                debug("grading #" + mine + "...");
-                const slow = setTimeout(function () { debug("grading #" + mine + " still running after 5 s"); }, 5000);
-                checker.grade(p, lang).then(function (g) {
-                    clearTimeout(slow);
-                    debug("grading #" + mine + " done in " + (Date.now() - start) + " ms: " + g.grade + "%" + (mine !== seq ? " - a newer change replaces it" : ""));
-                    if (mine !== seq) return;                        // a newer change is being graded
-                    adapter.save({ v: 1, program: p, grade: g.grade, feedback: g.feedback }, g.grade / 100);
-                }).catch(function (e) {
-                    clearTimeout(slow);
-                    /* nothing is saved: the inputs keep their last values */
-                    if (global.console) console.error("[ScratchQ] grading failed:", e);
-                });
-            }, 400);
+            pending = p;
+            timer = setTimeout(gradeNow, 100);
+        }
+        /*
+         * Pressing Moodle's Check takes the focus out of this frame (the button is on the page): the last edit is graded
+         * at once then, so its score is in the input before the page is sent.
+         */
+        if (adapter.gradeOnBlur && !review) global.addEventListener("blur", function () {
+            if (editorApi) editorApi.flush();
+            if (pending) { debug("the frame lost the focus: grading now"); gradeNow(); }
+        });
+        let editorApi = null;
+        function gradeNow() {
+            clearTimeout(timer);
+            const p = pending;
+            pending = null;
+            if (!p) return;
+            /* the starting program untouched (or put back as it was) is not an answer */
+            if (ScratchQ.sameProgram(p, initial)) { adapter.save(null, 0); return; }
+            const mine = seq += 1, start = Date.now();
+            debug("grading #" + mine + "...");
+            const slow = setTimeout(function () { debug("grading #" + mine + " still running after 5 s"); }, 5000);
+            checker.grade(p, lang).then(function (g) {
+                clearTimeout(slow);
+                debug("grading #" + mine + " done in " + (Date.now() - start) + " ms: " + g.grade + "%" + (mine !== seq ? " - a newer change replaces it" : ""));
+                if (mine !== seq) return;                        // a newer change is being graded
+                adapter.save({ v: 1, program: p, grade: g.grade, feedback: g.feedback }, g.grade / 100);
+            }).catch(function (e) {
+                clearTimeout(slow);
+                /* nothing is saved: the inputs keep their last values */
+                if (global.console) console.error("[ScratchQ] grading failed:", e);
+            });
         }
         return ScratchQ.Editor.create(edBox, {
             ScratchBlocks: SB, program: program, palette: cfg.palette, readOnly: review,
             locks: cfg.locks, enforceLocks: true, height: cfg.height || 460, onChange: changed
         }).then(function (editor) {
+            editorApi = editor;
             debug("the editor is ready (" + editor.workspace.getAllBlocks(false).length + " blocks)" + (review ? " - review" : ""));
             /* every edit's event (not the clicks and scrolling): shows whether the edits reach the editor */
             if (!review) editor.workspace.addChangeListener(function (e) { if (!e.isUiEvent) debug("edit event: " + e.type); });
@@ -304,6 +320,7 @@ function mountStackJs(stackJs, cfg) {
         return runQuestion(host, cfg, {
             state: stateEl ? stateEl.value : null,
             review: review,
+            gradeOnBlur: true,                           // the frame is the whole page: its blur is a click outside
             save: function (state, score) {
                 log(state ? "graded: " + state.grade + "%" : "no answer (the starting program, or nothing)");
                 put(stateEl, state ? ScratchQ.encodeState(state) : "", names.state);

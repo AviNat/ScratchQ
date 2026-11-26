@@ -362,8 +362,21 @@ function create(element, opts) {
     workspace.addChangeListener(vm.blockListener);
     const flyout = workspace.getFlyout && workspace.getFlyout();
     if (flyout && flyout.getWorkspace) flyout.getWorkspace().addChangeListener(vm.flyoutBlockListener);
+    /*
+     * Typing in a field: Blockly reports each key as an intermediate change and the final change only when the field
+     * is closed. The VM ignores the intermediate ones - so the typed value is put into the VM's block here, and the
+     * change is reported at once: a student who types and presses Moodle's Check right away is graded on what is typed.
+     */
+    const INTERMEDIATE = "block_field_intermediate_change";
     workspace.addChangeListener(function (e) {
-        if (loading || e.isUiEvent) return;
+        if (loading || e.type !== INTERMEDIATE) return;
+        const target = vm.editingTarget, b = target && target.blocks.getBlock(e.blockId);
+        if (!b || !b.fields || !b.fields[e.name]) return;
+        b.fields[e.name].value = e.newValue;
+        scheduleChange(0);
+    });
+    workspace.addChangeListener(function (e) {
+        if (loading || e.isUiEvent || e.type === INTERMEDIATE) return;
         if (enforce && !undoing && locksBroken()) {
             /* after the event group (the whole drag / delete) is finished: undo it */
             undoing = true;
@@ -373,16 +386,27 @@ function create(element, opts) {
             }, 0);
             return;
         }
+        scheduleChange(100);
+    });
+    /* the change to onChange after a short pause (one drag is several events); flush() reports a pending one now */
+    function reportChange() {
+        changeTimer = null;
+        if (undoing || loading) return;
+        const p = programFromVm(vm), key = ScratchQ.programKey(p);
+        if (key === lastKey) return;
+        lastKey = key;
+        opts.onChange(p);
+    }
+    function scheduleChange(ms) {
         if (typeof opts.onChange !== "function") return;
         clearTimeout(changeTimer);
-        changeTimer = setTimeout(function () {
-            if (undoing || loading) return;
-            const p = programFromVm(vm), key = ScratchQ.programKey(p);
-            if (key === lastKey) return;
-            lastKey = key;
-            opts.onChange(p);
-        }, 150);
-    });
+        changeTimer = setTimeout(reportChange, ms);
+    }
+    function flush() {
+        if (changeTimer === null) return;
+        clearTimeout(changeTimer);
+        reportChange();
+    }
 
     /* resolves when the workspace shows the program and its load events are over (an edit after it is the user's) */
     function setProgram(program) {
@@ -421,6 +445,7 @@ function create(element, opts) {
         },
         setPalette: function (palette) { if (!readOnly) { workspace.updateToolbox(toolboxXml(palette)); refreshPalette(); } },
         resize: function () { SB.svgResize(workspace); },
+        flush: flush,
         dispose: function () { clearTimeout(changeTimer); clearTimeout(paletteTimer); workspace.dispose(); element.textContent = ""; }
     };
     workspace.scratchqEditor = api;
