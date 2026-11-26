@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>ScratchQ editor tests</title>
+<script src="https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js"></script>
+<script src="../scratchq.js"></script>
+<script src="../scratchq-editor.js"></script>
+<script src="program-helper.js"></script>
+<style>body { font-family: sans-serif; margin: 10px; } #ed { border: 1px solid #ccc; }</style>
+</head>
+<body>
+<p>עמוד בעברית (RTL) - הבלוקים באנגלית (LTR)</p>
+<div id="ed"></div>
+<pre id="out" dir="ltr">running…</pre>
+<script type="module">
+const out = { passed: 0, failed: 0, lines: [] };
+function ok(cond, name, detail) {
+    if (cond) out.passed += 1; else out.failed += 1;
+    out.lines.push((cond ? "ok   " : "FAIL ") + name + (cond || detail === undefined ? "" : "  -> " + JSON.stringify(detail).slice(0, 600)));
+}
+const said = r => r.say.map(s => (s.type === "say" ? "" : s.type + ":") + s.text).join("|");
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const GF = ["event_whenflagclicked"];
+
+try {
+    const SB = await import(ScratchQ.Editor.SCRATCH_BLOCKS_URL);
+    ok(typeof SB.inject === "function", "scratch-blocks loaded (Blockly " + (SB.VERSION || "?") + ")");
+
+    const program = prog({ vars: { sum: 0 } }, [GF,
+        ["data_setvariableto", { VALUE: 0 }, { VARIABLE: "sum" }],
+        ["control_repeat", { TIMES: 5, SUBSTACK: [["data_changevariableby", { VALUE: 2 }, { VARIABLE: "sum" }]] }],
+        ["looks_say", { MESSAGE: ["operator_join", { STRING1: "sum=", STRING2: { v: "sum" } }] }]]);
+    let changes = 0;
+    const ed = await ScratchQ.Editor.create(document.getElementById("ed"), { ScratchBlocks: SB, program, onChange: () => { changes += 1; } });
+    await sleep(300);
+    const types = ed.workspace.getAllBlocks(false).filter(b => !b.isShadow()).map(b => b.type).sort();
+    ok(types.join(",") === ["control_repeat", "data_changevariableby", "data_setvariableto", "event_whenflagclicked", "looks_say", "operator_join", "data_variable"].sort().join(","),
+        "program -> workspace", types);
+
+    const back = ed.getProgram();
+    const r1 = await ScratchQ.Runner.run(back, {});
+    ok(said(r1) === "sum=10", "workspace -> program runs the same", r1);
+    ok(back.variables.length === 1 && back.variables[0].name === "sum", "variables kept", back.variables);
+
+    /* the teacher adds a block at the end of the script, as a drag would */
+    const last = ed.workspace.getAllBlocks(false).find(b => b.type === "looks_say");
+    const added = SB.serialization.blocks.append({ type: "looks_say", inputs: { MESSAGE: { shadow: { type: "text", fields: { TEXT: "added" } } } } }, ed.workspace);
+    last.nextConnection.connect(added.previousConnection);
+    await sleep(400);
+    const r2 = await ScratchQ.Runner.run(ed.getProgram(), {});
+    ok(said(r2) === "sum=10|added", "a block added in the workspace reaches the program", r2);
+    ok(changes > 0, "onChange called (" + changes + ")");
+
+    /* a field edited: repeat 5 -> 3 */
+    const rep = ed.workspace.getAllBlocks(false).find(b => b.type === "control_repeat");
+    rep.getInputTargetBlock("TIMES").setFieldValue("3", "NUM");
+    await sleep(300);
+    const r3 = await ScratchQ.Runner.run(ed.getProgram(), {});
+    ok(said(r3) === "sum=6|added", "a field edited reaches the program", r3);
+
+    /* a palette restricted to a few blocks */
+    ed.setPalette({ blocks: ["event_whenflagclicked", "looks_say", "control_repeat", "VARIABLES"] });
+    const tb = ed.workspace.getToolbox();
+    const cats = tb.getToolboxItems().map(i => i.getName && i.getName()).filter(Boolean);
+    ok(cats.join(",") === "Looks,Events,Control,Variables", "palette categories", cats);
+
+    /* locks enforced: the student's workspace with "repeat" locked with its values and "say" locked */
+    const lp = ed.getProgram();
+    const idOf = op => Object.keys(lp.blocks).find(id => lp.blocks[id].opcode === op);
+    const locks = { [idOf("control_repeat")]: "fields", [idOf("looks_say")]: "block" };
+    const sHost = document.createElement("div");
+    document.body.appendChild(sHost);
+    const st = await ScratchQ.Editor.create(sHost, { ScratchBlocks: SB, program: lp, locks, enforceLocks: true, height: 300 });
+    await sleep(300);
+    const sRep = st.workspace.getBlockById(idOf("control_repeat"));
+    ok(!sRep.isMovable() && !sRep.isDeletable() && !sRep.getInputTargetBlock("TIMES").isEditable(), "lock with values: not movable / deletable / editable");
+    const sSay = st.workspace.getBlockById(idOf("looks_say"));
+    ok(!sSay.isMovable() && sSay.getInputTargetBlock("MESSAGE").isMovable(), "lock: the block is fixed, its unlocked reporter is not");
+    /* the unlocked "set" block above is dragged away with everything under it -> undone */
+    const sSet = st.workspace.getBlockById(idOf("data_setvariableto"));
+    sSet.unplug(false);
+    sSet.moveBy(300, 0);
+    await sleep(200);
+    ok(sSet.getRootBlock().type === "event_whenflagclicked" && sRep.getRootBlock().type === "event_whenflagclicked", "a drag that carries locked blocks away is undone");
+    /* a new block may be put between locked blocks */
+    const ins = SB.serialization.blocks.append({ type: "looks_think", inputs: { MESSAGE: { shadow: { type: "text", fields: { TEXT: "in" } } } } }, st.workspace);
+    sRep.nextConnection.connect(ins.previousConnection);
+    await sleep(200);
+    ok(ins.getRootBlock().type === "event_whenflagclicked" && sSay.getRootBlock().type === "event_whenflagclicked" && ins.getNextBlock() === sSay,
+        "a block inserted between locked blocks stays");
+    const rIns = await ScratchQ.Runner.run(st.getProgram(), {});
+    ok(said(rIns) === "think:in|sum=6|added", "the inserted block runs", rIns);
+
+    /* the builder's lock marking: setLock + getLocks + the dashed outline */
+    let reported = null;
+    const bHost = document.createElement("div");
+    document.body.appendChild(bHost);
+    const bl = await ScratchQ.Editor.create(bHost, { ScratchBlocks: SB, program: lp, lockMenu: true, onLocksChange: l => { reported = l; }, height: 300 });
+    bl.setLock([idOf("looks_say")], "block");
+    ok(reported && reported[idOf("looks_say")] === "block" && bl.workspace.getBlockById(idOf("looks_say")).getSvgRoot().classList.contains("sq-lock-mark"),
+        "builder: lock marked and reported");
+    ok(bl.workspace.getBlockById(idOf("looks_say")).isMovable(), "builder: a marked block can still be edited by the teacher");
+
+    /* read-only view of the same program */
+    const view = document.createElement("div");
+    document.body.appendChild(view);
+    const ro = await ScratchQ.Editor.create(view, { ScratchBlocks: SB, program: ed.getProgram(), readOnly: true, height: 260 });
+    await sleep(300);
+    ok(ro.workspace.getAllBlocks(false).length === ed.workspace.getAllBlocks(false).length && ro.workspace.options.readOnly, "read-only view");
+
+    /* the Variables palette: set / change appear for the loaded variables, and for a variable made later */
+    const flyTypes = w => w.getFlyout().getWorkspace().getTopBlocks(false).map(b => b.type);
+    ok(flyTypes(ed.workspace).includes("data_setvariableto") && flyTypes(ed.workspace).includes("data_changevariableby"),
+        "palette: set / change for the program's variables", flyTypes(ed.workspace).filter(t => /^data_/.test(t)));
+    const vHost = document.createElement("div");
+    document.body.appendChild(vHost);
+    const ve = await ScratchQ.Editor.create(vHost, { ScratchBlocks: SB, program: ScratchQ.emptyProgram(), height: 260 });
+    await sleep(200);
+    const before = flyTypes(ve.workspace).includes("data_setvariableto");
+    ve.workspace.createVariable("x", "", "vx");
+    await sleep(200);
+    ok(!before && flyTypes(ve.workspace).includes("data_setvariableto"), "palette: set appears once a variable is made", { before });
+    ve.dispose();
+} catch (e) {
+    ok(false, "exception: " + (e && e.stack || e));
+}
+document.getElementById("out").textContent = out.lines.join("\n");
+window.__result = out;
+window.__done = true;
+</script>
+</body>
+</html>

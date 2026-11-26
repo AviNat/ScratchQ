@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Make the example exercise</title>
+<script src="program-helper.js"></script>
+</head>
+<body>
+<script>
+/* prints examples/sum-1-to-n.scratchq (run with run-page.mjs, the JSON is the one output line) */
+const GF = ["event_whenflagclicked"];
+const sumProg = (times, add) => prog({ vars: { n: 0, sum: 0, i: 0 } }, [GF,
+    ["sensing_askandwait", { QUESTION: "Up to which number?" }],
+    ["data_setvariableto", { VALUE: ["sensing_answer"] }, { VARIABLE: "n" }],
+    ["data_setvariableto", { VALUE: 0 }, { VARIABLE: "sum" }],
+    ["data_setvariableto", { VALUE: 1 }, { VARIABLE: "i" }],
+    ["control_repeat", { TIMES: times, SUBSTACK: [
+        ["data_changevariableby", { VALUE: add }, { VARIABLE: "sum" }],
+        ["data_changevariableby", { VALUE: 1 }, { VARIABLE: "i" }]] }],
+    ["looks_say", { MESSAGE: ["operator_join", { STRING1: "The sum is ", STRING2: { v: "sum" } }] }]]);
+const reference = sumProg({ v: "n" }, { v: "i" });
+/* the bug to fix: the loop runs one time too few */
+const initial = sumProg(["operator_subtract", { NUM1: { v: "n" }, NUM2: 1 }], { v: "i" });
+const sayId = Object.keys(initial.blocks).find(id => initial.blocks[id].opcode === "looks_say");
+/* a common mistake: adding 1 instead of i (counting, not summing) */
+const mistake = sumProg({ v: "n" }, 1);
+const state = {
+    tool: "scratchq-builder", formatVersion: 1, builderVersion: "0.1.0",
+    kind: "program", language: "he", height: 460,
+    palette: { blocks: ["event_whenflagclicked", "looks_say", "control_repeat", "sensing_askandwait", "sensing_answer",
+        "operator_add", "operator_subtract", "operator_join", "VARIABLES"] },
+    reference, initial, locks: { [sayId]: "fields" },
+    tests: [
+        { name: "n=3", vars: {}, lists: {}, answers: ["3"], seed: 1, hidden: false },
+        { name: "n=10", vars: {}, lists: {}, answers: ["10"], seed: 1, hidden: false },
+        { name: "n=100", vars: {}, lists: {}, answers: ["100"], seed: 1, hidden: true }],
+    observe: { say: true, vars: ["sum"], lists: [], caseSensitive: false },
+    trace: { items: [{ kind: "say" }] },
+    mistakes: [{ program: mistake, score: 20, message: {
+        he: "בכל סיבוב מוסיפים לסכום 1 במקום את i - כך סופרים, לא מסכמים.",
+        ar: "في كل دورة تضيف 1 إلى المجموع بدلاً من i - هكذا تَعُدّ ولا تجمع.",
+        en: "Each round adds 1 to the sum instead of i - that counts, it does not sum." } }],
+    question: { target: "stack", questionId: "sum-1-to-n", inputs: { score: "ans1", state: "ans2" },
+        review: { grade: true, feedback: true, reference: true }, libraryUrl: "https://avinat.github.io/ScratchQ/" }
+};
+window.__result = { passed: 1, failed: 0, lines: [JSON.stringify(state, null, 2)] };
+window.__done = true;
+</script>
+</body>
+</html>

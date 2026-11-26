@@ -1,0 +1,1348 @@
+<!doctype html>
+<!--
+  Copyright (c) 2026 Avi Nathan. All rights reserved.
+  No part of this file may be copied, modified or distributed without the written permission of the copyright holder.
+-->
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scratch Question Builder</title>
+<!--
+  Teacher tool: builds a Scratch-program question (SCRATCH-DESIGN.md, section 11). Five tabs, as the chemistry and
+  math builders: 1 the question kind and the student's palette, 2 the reference program, the tests and a student
+  attempt graded live, 3 didactics (the starting program with its locks, the teacher's mistakes), 4 the exercise
+  file (.scratchq), 5 the question code (STACK-JS or a stand-alone page) with a try as a student.
+
+  The exercise file is the builder's whole JSON; the question code holds only what the library reads.
+  The student-side code is in the library (scratchq-question.js); the code only loads it and passes the
+  configuration, with no < > & in its script (Moodle may escape them).
+
+  Nothing in this page may contain the text of a script tag except the real tags (write it as "<"+"script").
+-->
+<script src="https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js"></script>
+<script src="scratchq.js"></script>
+<script src="scratchq-editor.js"></script>
+<script src="scratchq-question.js"></script>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#fff; --text:#1d2733; --muted:#5b6876; --line:#d5dce4;
+  --accent:#1f5f99; --accent-soft:#e3eef8; --ok:#1a7f37; --warn:#9a5b00; --bad:#b42318;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 Arial,sans-serif}
+header{position:sticky;top:0;z-index:50;background:var(--card);border-bottom:1px solid var(--line);
+  display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:10px 16px}
+header h1{font-size:18px;margin:0;flex:1 1 auto}
+nav.tabs{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:4px;align-items:flex-end;margin:2px -16px -10px;padding:6px 16px 0;border-top:1px solid var(--line)}
+nav.tabs button[role=tab]{border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;background:none;padding:7px 14px;color:var(--muted)}
+nav.tabs button[role=tab]:hover{background:var(--accent-soft)}
+nav.tabs button[aria-selected=true]{background:var(--bg);border-color:var(--line);color:var(--text);font-weight:bold}
+nav.tabs button.has-issue::after{content:" ⚠";color:var(--warn)}
+.tab-note{margin-inline-start:auto;align-self:center;font-size:13px;color:var(--muted);padding-bottom:6px}
+#dirtyMark{color:var(--warn);font-size:13px}
+main{max-width:1180px;margin:0 auto;padding:16px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+section h2{font-size:16px;margin:0 0 10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+section h3{font-size:14px;margin:14px 0 6px}
+.hint{color:var(--muted);font-size:13px;margin:4px 0 10px}
+.row{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:8px 0}
+label.field{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--muted)}
+label.check{display:flex;gap:8px;align-items:flex-start;margin:4px 0}
+[hidden]{display:none!important}
+input[type=text],input[type=url],select,textarea{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--text)}
+input[type=number]{font:inherit;width:72px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+button{font:inherit;padding:5px 12px;border:1px solid #9fb0c2;border-radius:6px;background:#fff;color:var(--text);cursor:pointer}
+button:hover{background:var(--accent-soft)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:#174c7b}
+button.small{padding:2px 8px;font-size:13px}
+.editor-box{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#f9f9f9}
+.status{margin-top:8px;font-size:14px;white-space:pre-wrap}
+.status.ok{color:var(--ok)} .status.bad{color:var(--bad)} .status.warn{color:var(--warn)} .status.info{color:var(--muted)}
+.palette-cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px 18px}
+.palette-cat h4{margin:4px 0;font-size:14px;display:flex;align-items:center;gap:6px}
+.palette-cat h4 .dot{width:14px;height:14px;border-radius:7px;display:inline-block}
+.palette-cat label{font:13px Consolas,monospace;direction:ltr}
+.cards{display:grid;gap:12px}
+.card{border:1px solid #d5dbe3;border-radius:8px;padding:10px 12px;background:#fcfdfe}
+.card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.card-head b{flex:1}
+.test-grid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(260px,1fr);gap:10px 18px}
+.test-grid textarea{width:100%;min-height:54px;font:13px Consolas,monospace;direction:ltr}
+.vals{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;font-size:13px}
+.vals input{width:100%;font:13px Consolas,monospace;direction:ltr}
+.expected{font:13px Consolas,monospace;background:#f3f6f9;border:1px solid var(--line);border-radius:6px;padding:6px 8px;white-space:pre-wrap;direction:ltr;unicode-bidi:plaintext;min-height:54px}
+.expected.bad{background:#fdecea;border-color:#f3b4ad}
+.result-table{border-collapse:collapse;margin-top:8px;font-size:13px;width:100%}
+.result-table td,.result-table th{border:1px solid var(--line);padding:4px 8px;text-align:start;vertical-align:top}
+.result-table th{background:#eef3f8}
+.result-table td.mono{font-family:Consolas,monospace;direction:ltr;unicode-bidi:plaintext;white-space:pre-wrap}
+.pass{color:var(--ok);font-weight:bold} .fail{color:var(--bad);font-weight:bold}
+.grade-line{font-size:17px;font-weight:bold;margin-top:8px}
+.msg-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 8px;align-items:center;margin-top:8px}
+.msg-grid input{width:100%}
+textarea.code{width:100%;height:200px;font:12px/1.4 Consolas,monospace;direction:ltr;text-align:left;border:1px solid var(--line);border-radius:6px;padding:8px;background:#fafbfc}
+table.summary{border-collapse:collapse;width:100%}
+table.summary td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;background:#f8fafc}
+#issues ul{margin:6px 0 0;padding-inline-start:20px}
+#issues li{color:var(--bad)} #issues li.info{color:var(--muted)} #issues li.warn{color:var(--warn)}
+.help table{border-collapse:collapse;margin:6px 0}
+.help td,.help th{border:1px solid var(--line);padding:4px 10px;text-align:start}
+.help th{background:#eef3f8}
+.help code{background:#eef1f5;border-radius:4px;padding:0 4px}
+#tryHost{max-width:1000px}
+.split{display:grid;grid-template-columns:1fr;gap:12px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Scratch Question Builder</h1>
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" id="tabBtnPalette" aria-controls="tabPalette">1. Question &amp; blocks</button>
+    <button type="button" role="tab" id="tabBtnChecker" aria-controls="tabChecker">2. Reference &amp; tests</button>
+    <button type="button" role="tab" id="tabBtnDidactics" aria-controls="tabDidactics">3. Didactics</button>
+    <button type="button" role="tab" id="tabBtnFile" aria-controls="tabFile">4. Exercise file</button>
+    <button type="button" role="tab" id="tabBtnQuestion" aria-controls="tabQuestion">5. Question code</button>
+    <span class="tab-note"><span id="tabFileName"></span> <span id="dirtyMark"></span></span>
+  </nav>
+</header>
+
+<!-- 1. the question kind, the student language, the palette -->
+<main id="tabPalette" role="tabpanel" hidden>
+<section>
+  <h2>The question</h2>
+  <div class="row">
+    <label class="check"><input type="radio" name="kind" value="program" checked> <span><b>Program</b> - the student completes, fixes or writes a program. It is graded by tests.</span></label>
+  </div>
+  <div class="row" style="margin-top:0">
+    <label class="check"><input type="radio" name="kind" value="trace"> <span><b>Trace</b> - the student reads a program and writes what it gives (what the sprite says, a variable's value). No editing.</span></label>
+  </div>
+  <div class="row">
+    <label class="field">Student language (feedback and the texts around the blocks; the blocks are in English)
+      <select id="language">
+        <option value="he">עברית - Hebrew</option>
+        <option value="ar">العربية - Arabic</option>
+        <option value="en">English</option>
+        <option value="system">The page's language (Moodle's)</option>
+      </select>
+    </label>
+    <label class="field">Block area height (px)<input type="number" id="height" min="200" max="1200" step="20"></label>
+  </div>
+</section>
+<section id="paletteSection">
+  <h2>The student's palette
+    <button type="button" class="small" id="palAll">All</button>
+    <button type="button" class="small" id="palNone">None</button>
+    <button type="button" class="small" id="palReference">Only the blocks of the reference</button>
+  </h2>
+  <p class="hint">The blocks the student can drag in. Blocks already in the starting program are there anyway.</p>
+  <div class="palette-cats" id="paletteCats"></div>
+  <div class="status" id="paletteStatus"></div>
+</section>
+<section>
+  <h2>Preview - what the student sees</h2>
+  <p class="hint">The starting program (tab 3) with its locks and this palette. It is not graded here (tab 2 grades a student attempt).</p>
+  <div id="previewHost"></div>
+</section>
+</main>
+
+<!-- 2. the reference program, the tests, a student attempt -->
+<main id="tabChecker" role="tabpanel" hidden>
+<section>
+  <h2 id="refTitle">The reference program</h2>
+  <p class="hint" id="refHint">The correct program. Its outputs on the tests below are what the student's program must give. Variables: use "Make a Variable" in the Variables category.</p>
+  <div class="editor-box" id="refHost"></div>
+  <div class="status" id="refStatus"></div>
+</section>
+
+<section id="observeSection">
+  <h2>What is checked</h2>
+  <p class="hint">The outputs compared with the reference's. Numbers are compared by value (5 = 5.0).</p>
+  <div id="observeBox"></div>
+  <label class="check"><input type="checkbox" id="caseSensitive"> <span>Upper and lower case must match (Scratch's "=" ignores case)</span></label>
+</section>
+
+<section id="traceSection" hidden>
+  <h2>What the student answers</h2>
+  <p class="hint">One answer field for each item. The correct answer is what the program gives - shown below.</p>
+  <div id="traceItemsBox"></div>
+  <h3>The data of the run</h3>
+  <div id="traceTestBox"></div>
+  <h3>The correct answer</h3>
+  <div class="expected" id="traceExpected"></div>
+</section>
+
+<section id="testsSection">
+  <h2>Tests <button type="button" class="small" id="addTest">+ Add a test</button></h2>
+  <p class="hint">Each test runs the program once: from the green flag, with these values. Empty values: the program's own. A hidden test is graded but its details are not shown to the student.</p>
+  <div class="cards" id="testsBox"></div>
+  <p class="hint">The grade: the share of the tests passed (each test counts the same). A teacher mistake (tab 3) can set another grade.</p>
+</section>
+
+<section>
+  <h2>A student attempt - graded live <button type="button" class="small" id="attemptReset">Back to the starting program</button></h2>
+  <p class="hint" id="attemptHint">Work as a student would: the palette of tab 1, the starting program and locks of tab 3.</p>
+  <div id="attemptHost"></div>
+  <div id="attemptResult"></div>
+</section>
+</main>
+
+<!-- 3. didactics: the starting program with its locks, the teacher's mistakes -->
+<main id="tabDidactics" role="tabpanel" hidden>
+<section id="initialSection">
+  <h2>The starting program
+    <button type="button" class="small" id="initFromRef">Start from the reference</button>
+    <button type="button" class="small" id="initEmpty">Empty</button>
+  </h2>
+  <p class="hint">What the student starts with: part of the program to complete, or a program with a bug to fix. Leave blocks out, or change them.
+    <b>Locks:</b> right-click a block - 🔒 Lock (the student cannot move or delete it), 🔒 Lock with its values (nothing in it can change), or the whole script. Locked blocks have a dashed outline (red: values locked too). The student may still put new blocks between locked ones.</p>
+  <div class="editor-box" id="initHost"></div>
+  <div class="status" id="initStatus"></div>
+</section>
+<section id="mistakesSection">
+  <h2>Common mistakes <button type="button" class="small" id="addMistake">+ Add a mistake</button></h2>
+  <p class="hint">A wrong program a student may write. When a student's program gives the same outputs on every test, the student gets your message first (and the grade you set, if any). Matching is by behaviour, so any program with the same mistake matches.</p>
+  <div class="cards" id="mistakesBox"></div>
+</section>
+<section id="traceDidactics" hidden>
+  <h2>Mistakes in a trace question</h2>
+  <p class="hint">Planned: the built-in misconceptions (a loop one time too few or too many, lists counted from 0, …) and wrong answers typed by the teacher. Not in this version.</p>
+</section>
+</main>
+
+<!-- 4. the exercise file -->
+<main id="tabFile" role="tabpanel" hidden>
+<section>
+  <h2>The exercise file (.scratchq)</h2>
+  <div class="row">
+    <button type="button" id="fileNew">New</button>
+    <button type="button" id="fileOpen">Open…</button>
+    <button type="button" class="primary" id="fileSave">Save</button>
+    <button type="button" id="fileSaveAs">Save as…</button>
+    <input type="file" id="fileInput" accept=".scratchq,.json,.txt,.html" hidden>
+  </div>
+  <p class="hint">The file holds everything the builder needs. The question code (tab 5) is separate. Open also reads a question code saved before.</p>
+  <table class="summary" id="fileSummary"></table>
+</section>
+<section>
+  <h2>Scratch files (.sb3)</h2>
+  <div class="row">
+    <label class="field">Import a program made in Scratch into
+      <select id="importTarget"><option value="reference">the reference program</option><option value="initial">the starting program</option></select>
+    </label>
+    <button type="button" id="importSb3">Import .sb3…</button>
+    <input type="file" id="sb3Input" accept=".sb3" hidden>
+    <button type="button" id="exportRef">Export the reference as .sb3</button>
+    <button type="button" id="exportInit">Export the starting program as .sb3</button>
+  </div>
+  <p class="hint">Import takes the scripts of one sprite and its variables and lists. Export opens in Scratch (File → Load from your computer) - to run the program there.</p>
+  <div class="status" id="sb3Status"></div>
+</section>
+<section>
+  <h2>The file's JSON <button type="button" class="small" id="copyJson">Copy</button> <span id="copyJsonMsg" class="hint"></span></h2>
+  <textarea class="code" id="fileJson" readonly></textarea>
+</section>
+</main>
+
+<!-- 5. the question code -->
+<main id="tabQuestion" role="tabpanel" hidden>
+<section>
+  <h2>Settings</h2>
+  <div class="row">
+    <label class="check"><input type="radio" name="target" value="stack" checked> <span>Moodle STACK (STACK-JS frame)</span></label>
+    <label class="check"><input type="radio" name="target" value="html"> <span>A stand-alone web page</span></label>
+  </div>
+  <div class="row">
+    <label class="field">Question name<input type="text" id="questionId" style="width:260px"></label>
+    <label class="field q-stack">Score input<input type="text" id="inputScore" style="width:90px"></label>
+    <label class="field q-stack">State input<input type="text" id="inputState" style="width:90px"></label>
+  </div>
+  <div class="row">
+    <span>The review shows:</span>
+    <label class="check"><input type="checkbox" id="reviewGrade"> the grade</label>
+    <label class="check"><input type="checkbox" id="reviewFeedback"> the feedback</label>
+    <label class="check"><input type="checkbox" id="reviewReference"> the correct program / answer</label>
+  </div>
+  <div class="row">
+    <label class="field">Library folder (scratchq.js, scratchq-editor.js, scratchq-question.js)<input type="url" id="libraryUrl" style="width:min(560px,90vw);direction:ltr"></label>
+  </div>
+  <div id="issues"></div>
+</section>
+<section>
+  <h2>Try it as a student</h2>
+  <div id="tryHost"></div>
+  <div class="row">
+    <button type="button" class="primary" id="trySubmit">Submit</button>
+    <button type="button" id="tryAgain" hidden>Try again</button>
+  </div>
+  <textarea class="code" id="tryState" readonly style="height:70px" placeholder="The saved state (what the state input gets)"></textarea>
+</section>
+<section>
+  <h2>The code <button type="button" class="small" id="copyCode">Copy the code</button> <button type="button" class="small" id="saveCode">Save the code…</button> <span id="copyCodeMsg" class="hint"></span></h2>
+  <p class="hint" id="codeHint"></p>
+  <textarea class="code" id="code" readonly></textarea>
+</section>
+<section class="q-stack help">
+  <h2>Setting up the STACK question</h2>
+  <div id="stackHelp"></div>
+  <h3>Question variables <button type="button" class="small" id="copyModel">Copy</button> <span id="copyModelMsg" class="hint"></span></h3>
+  <textarea class="code" id="modelVar" readonly style="height:70px"></textarea>
+</section>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const BUILDER_VERSION = "0.1.0";
+const CODE_VERSION = "2026-11-26.1";
+const TOOL = "scratchq-builder";
+const QUESTION_TOOL = "scratchq-question";
+const FILE_EXT = ".scratchq";
+const DEFAULT_LIBRARY = "https://avinat.github.io/ScratchQ/";
+const VM_URL = "https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js";
+const STACK_MODEL_VAR = "sqmodel";
+
+/* ================================================================
+   The state: the exercise (what the .scratchq file holds)
+   ================================================================ */
+function newProgram() {
+    /* a green flag to start from */
+    return { v: 1, variables: [], lists: [], blocks: { flag: { opcode: "event_whenflagclicked", next: null, parent: null, inputs: {}, fields: {}, shadow: false, topLevel: true, x: 0, y: 0 } } };
+}
+function defaultState() {
+    return {
+        tool: TOOL, formatVersion: 1,
+        kind: "program", language: "he", height: 460,
+        palette: { blocks: ScratchQ.Editor.ALL_BLOCKS.slice() },
+        reference: newProgram(), initial: null, locks: {},
+        tests: [{ name: "1", vars: {}, lists: {}, answers: [], seed: 1, hidden: false }],
+        observe: { say: true, vars: [], lists: [], caseSensitive: false },
+        trace: { items: [{ kind: "say" }] },
+        mistakes: [],
+        question: { target: "stack", questionId: "scratch1", inputs: { score: "ans1", state: "ans2" },
+            review: { grade: true, feedback: true, reference: true }, libraryUrl: DEFAULT_LIBRARY }
+    };
+}
+let state = defaultState();
+let fileName = "", fileHandle = null, dirty = false;
+let SB = null;
+const editors = {};               // ref, init, attempt, preview, mistake<i>
+let currentTab = "checker";
+
+function savePreference(k, v) { try { localStorage.setItem("scratchq.builder." + k, v); } catch (e) { /* private */ } }
+function preference(k) { try { return localStorage.getItem("scratchq.builder." + k); } catch (e) { return null; } }
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+function changed() {
+    if (!dirty) { dirty = true; renderFileState(); }
+    scheduleChecks();
+}
+function renderFileState() {
+    $("tabFileName").textContent = fileName || "(new exercise)";
+    $("dirtyMark").textContent = dirty ? "● not saved" : "";
+}
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+/* the question configuration the library reads (also the checker's) */
+function checkConfig() {
+    return {
+        kind: state.kind, language: state.language, height: state.height,
+        reference: state.reference, initial: state.initial, locks: state.locks, palette: state.palette,
+        tests: state.tests.map(t => testForRun(t)), observe: state.observe, trace: state.trace,
+        mistakes: state.mistakes.map(m => ({ program: m.program, message: m.message, score: m.score }))
+    };
+}
+/* a test as the runner takes it: empty values left out (the program's own) */
+function testForRun(t) {
+    const out = { name: t.name || "", answers: (t.answers || []).slice(), seed: Number(t.seed) || 1, hidden: !!t.hidden, vars: {}, lists: {} };
+    Object.keys(t.vars || {}).forEach(n => { if (String(t.vars[n]).trim() !== "") out.vars[n] = t.vars[n]; });
+    Object.keys(t.lists || {}).forEach(n => { if (t.lists[n] !== null && t.lists[n] !== undefined && String(t.lists[n]).trim() !== "") out.lists[n] = String(t.lists[n]).split(",").map(s => s.trim()); });
+    return out;
+}
+
+/* ================================================================
+   Program facts
+   ================================================================ */
+function opcodes(program) {
+    const set = new Set();
+    Object.values((program && program.blocks) || {}).forEach(b => { if (b && !Array.isArray(b) && !b.shadow) set.add(b.opcode); });
+    return set;
+}
+function usesAsk(p) { return opcodes(p).has("sensing_askandwait"); }
+function usesRandom(p) { return opcodes(p).has("operator_random"); }
+function varNames(p) { return ((p && p.variables) || []).map(v => v.name); }
+function listNames(p) { return ((p && p.lists) || []).map(l => l.name); }
+
+/* ================================================================
+   Tabs
+   ================================================================ */
+const TABS = ["palette", "checker", "didactics", "file", "question"];
+const tabId = (prefix, name) => prefix + name.charAt(0).toUpperCase() + name.slice(1);
+function showTab(name) {
+    if (TABS.indexOf(name) < 0) name = "checker";
+    currentTab = name;
+    savePreference("tab", name);
+    TABS.forEach(n => {
+        $(tabId("tab", n)).hidden = n !== name;
+        $(tabId("tabBtn", n)).setAttribute("aria-selected", String(n === name));
+    });
+    /* a Blockly workspace measured while hidden has no size: measure again */
+    Object.values(editors).forEach(e => { try { e && e.resize(); } catch (x) { /* disposed */ } });
+    if (name === "palette") renderPreview();
+    if (name === "file") renderFileTab();
+    if (name === "question") renderQuestionTab(true);
+}
+TABS.forEach(n => $(tabId("tabBtn", n)).addEventListener("click", () => showTab(n)));
+
+/* ================================================================
+   Tab 1: the kind, the language, the palette
+   ================================================================ */
+const BLOCK_LABELS = {
+    looks_sayforsecs: "say (Hello!) for (2) seconds", looks_say: "say (Hello!)", looks_thinkforsecs: "think (Hmm...) for (2) seconds", looks_think: "think (Hmm...)",
+    event_whenflagclicked: "when ⚑ clicked",
+    control_wait: "wait (1) seconds", control_repeat: "repeat (10)", control_forever: "forever", control_if: "if ⟨ ⟩ then", control_if_else: "if ⟨ ⟩ then … else",
+    control_repeat_until: "repeat until ⟨ ⟩", control_stop: "stop [all]",
+    sensing_askandwait: "ask (…) and wait", sensing_answer: "(answer)",
+    operator_add: "( ) + ( )", operator_subtract: "( ) - ( )", operator_multiply: "( ) * ( )", operator_divide: "( ) / ( )",
+    operator_random: "pick random (1) to (10)", operator_gt: "⟨( ) > ( )⟩", operator_lt: "⟨( ) < ( )⟩", operator_equals: "⟨( ) = ( )⟩",
+    operator_and: "⟨⟨ ⟩ and ⟨ ⟩⟩", operator_or: "⟨⟨ ⟩ or ⟨ ⟩⟩", operator_not: "⟨not ⟨ ⟩⟩", operator_join: "join ( ) ( )",
+    operator_letter_of: "letter (1) of ( )", operator_length: "length of ( )", operator_contains: "⟨( ) contains ( )?⟩",
+    operator_mod: "( ) mod ( )", operator_round: "round ( )", operator_mathop: "[abs] of ( )",
+    VARIABLES: "the Variables category (\"Make a Variable\", set, change, …)"
+};
+function renderPaletteChoices() {
+    const chosen = new Set(state.palette.blocks || []);
+    const box = $("paletteCats");
+    box.textContent = "";
+    ScratchQ.Editor.CATEGORIES.forEach(c => {
+        const items = c.custom ? ["VARIABLES"] : c.blocks.map(b => b[0]);
+        if (!items.length) return;
+        const div = document.createElement("div");
+        div.className = "palette-cat";
+        div.innerHTML = "<h4><span class=\"dot\" style=\"background:" + c.colour + "\"></span>" + esc(c.name) + "</h4>";
+        items.forEach(op => {
+            const l = document.createElement("label");
+            l.className = "check";
+            l.innerHTML = "<input type=\"checkbox\" data-op=\"" + op + "\"" + (chosen.has(op) ? " checked" : "") + "> <span>" + esc(BLOCK_LABELS[op] || op) + "</span>";
+            div.appendChild(l);
+        });
+        box.appendChild(div);
+    });
+}
+$("paletteCats").addEventListener("change", () => {
+    state.palette.blocks = Array.from($("paletteCats").querySelectorAll("input[data-op]:checked")).map(i => i.dataset.op);
+    paletteChanged();
+});
+function setPalette(list) {
+    state.palette.blocks = list;
+    renderPaletteChoices();
+    paletteChanged();
+}
+$("palAll").onclick = () => setPalette(ScratchQ.Editor.ALL_BLOCKS.slice());
+$("palNone").onclick = () => setPalette([]);
+$("palReference").onclick = () => {
+    const used = opcodes(state.reference);
+    const list = ScratchQ.Editor.ALL_BLOCKS.filter(op => used.has(op));
+    if (Array.from(used).some(op => op.indexOf("data_") === 0)) list.push("VARIABLES");
+    setPalette(list);
+};
+function paletteChanged() {
+    if (editors.attempt) editors.attempt.setPalette(state.palette);
+    if (editors.preview) editors.preview.setPalette(state.palette);
+    changed();
+}
+
+document.querySelectorAll("input[name=kind]").forEach(r => r.addEventListener("change", () => {
+    state.kind = document.querySelector("input[name=kind]:checked").value;
+    renderKind();
+    changed();
+}));
+$("language").addEventListener("change", () => { state.language = $("language").value; changed(); });
+$("height").addEventListener("change", () => { state.height = Math.max(200, Math.min(1200, Number($("height").value) || 460)); changed(); });
+
+/* the parts shown for one kind only */
+function renderKind() {
+    const trace = state.kind === "trace";
+    document.querySelectorAll("input[name=kind]").forEach(r => { r.checked = r.value === state.kind; });
+    $("paletteSection").hidden = trace;
+    $("observeSection").hidden = trace;
+    $("testsSection").hidden = trace;
+    $("traceSection").hidden = !trace;
+    $("initialSection").hidden = trace;
+    $("mistakesSection").hidden = trace;
+    $("traceDidactics").hidden = !trace;
+    $("attemptReset").hidden = trace;
+    $("refTitle").textContent = trace ? "The program the student reads" : "The reference program";
+    $("refHint").textContent = trace
+        ? "The program shown to the student (read-only). What it gives is the correct answer. Put the data in the program (set blocks), or give the answers to \"ask\" below."
+        : "The correct program. Its outputs on the tests below are what the student's program must give. Variables: use \"Make a Variable\" in the Variables category.";
+    $("attemptHint").textContent = trace ? "Answer as a student would." : "Work as a student would: the palette of tab 1, the starting program and locks of tab 3.";
+    renderAttempt(true);
+    if (currentTab === "palette") renderPreview();
+}
+
+/* the preview: the student's view, not saved */
+let previewSeq = 0;
+function renderPreview() {
+    const host = $("previewHost");
+    const mine = ++previewSeq;
+    if (editors.preview) { try { editors.preview.dispose(); } catch (e) { /* gone */ } editors.preview = null; }
+    host.textContent = "";
+    if (state.kind === "trace") {
+        ScratchQ.Question.mount(host, Object.assign(checkConfig(), { review: {} }), {});
+        return;
+    }
+    const box = document.createElement("div");
+    box.className = "editor-box";
+    host.appendChild(box);
+    ScratchQ.Editor.create(box, { ScratchBlocks: SB, program: ScratchQ.Question.startingProgram(checkConfig()), palette: state.palette, locks: state.locks, enforceLocks: true, height: state.height })
+        .then(ed => { if (mine === previewSeq) editors.preview = ed; else ed.dispose(); });
+}
+
+/* ================================================================
+   Tab 2: the reference, what is observed, the tests, the attempt
+   ================================================================ */
+function referenceChanged(program) {
+    state.reference = program;
+    /* observed variables / lists that no longer exist are dropped */
+    const vn = varNames(program), ln = listNames(program);
+    state.observe.vars = state.observe.vars.filter(n => vn.indexOf(n) >= 0);
+    state.observe.lists = state.observe.lists.filter(n => ln.indexOf(n) >= 0);
+    state.trace.items = state.trace.items.filter(it => it.kind === "say" || (it.kind === "var" ? vn : ln).indexOf(it.name) >= 0);
+    if (!state.trace.items.length) state.trace.items = [{ kind: "say" }];
+    renderObserve();
+    renderTests();
+    renderTraceSection();
+    changed();
+}
+
+function renderObserve() {
+    const box = $("observeBox");
+    const o = state.observe;
+    let html = "<label class=\"check\"><input type=\"checkbox\" data-obs=\"say\"" + (o.say !== false ? " checked" : "") + "> <span>What the sprite says or thinks (in order)</span></label>";
+    varNames(state.reference).forEach(n => {
+        html += "<label class=\"check\"><input type=\"checkbox\" data-obs=\"var\" data-name=\"" + esc(n) + "\"" + (o.vars.indexOf(n) >= 0 ? " checked" : "") + "> <span>The final value of the variable <b>" + esc(n) + "</b></span></label>";
+    });
+    listNames(state.reference).forEach(n => {
+        html += "<label class=\"check\"><input type=\"checkbox\" data-obs=\"list\" data-name=\"" + esc(n) + "\"" + (o.lists.indexOf(n) >= 0 ? " checked" : "") + "> <span>The final contents of the list <b>" + esc(n) + "</b></span></label>";
+    });
+    box.innerHTML = html;
+    $("caseSensitive").checked = !!o.caseSensitive;
+}
+$("observeBox").addEventListener("change", () => {
+    const o = state.observe;
+    o.say = !!$("observeBox").querySelector("input[data-obs=say]:checked");
+    o.vars = Array.from($("observeBox").querySelectorAll("input[data-obs=var]:checked")).map(i => i.dataset.name);
+    o.lists = Array.from($("observeBox").querySelectorAll("input[data-obs=list]:checked")).map(i => i.dataset.name);
+    changed();
+});
+$("caseSensitive").addEventListener("change", () => { state.observe.caseSensitive = $("caseSensitive").checked; changed(); });
+
+/* one test card: the inputs on the left, the reference's outputs on the right */
+function testInputsHtml(t, i) {
+    const p = state.reference;
+    let html = "";
+    if (usesAsk(p)) {
+        html += "<label class=\"field\">The answers to \"ask\", one per line<textarea data-f=\"answers\" data-i=\"" + i + "\">" + esc((t.answers || []).join("\n")) + "</textarea></label>";
+    }
+    const vn = varNames(p), ln = listNames(p);
+    if (vn.length || ln.length) {
+        html += "<div class=\"vals\">";
+        vn.forEach(n => {
+            const v = (t.vars || {})[n];
+            html += "<span>" + esc(n) + " =</span><input type=\"text\" data-f=\"var\" data-name=\"" + esc(n) + "\" data-i=\"" + i + "\" placeholder=\"(the program's value)\" value=\"" + esc(v === undefined ? "" : v) + "\">";
+        });
+        ln.forEach(n => {
+            const v = (t.lists || {})[n];
+            html += "<span>list " + esc(n) + " =</span><input type=\"text\" data-f=\"list\" data-name=\"" + esc(n) + "\" data-i=\"" + i + "\" placeholder=\"items, separated by commas\" value=\"" + esc(v === undefined || v === null ? "" : v) + "\">";
+        });
+        html += "</div>";
+    }
+    if (usesRandom(p)) {
+        html += "<label class=\"field\">Random seed (\"pick random\" gives the same numbers for the same seed)<input type=\"number\" data-f=\"seed\" data-i=\"" + i + "\" value=\"" + esc(t.seed || 1) + "\"></label>";
+    }
+    if (!html) html = "<p class=\"hint\">The program has no \"ask\", variables or lists: the test runs it as it is.</p>";
+    return html;
+}
+function renderTests() {
+    const box = $("testsBox");
+    box.textContent = "";
+    state.tests.forEach((t, i) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML =
+            "<div class=\"card-head\"><b>Test <input type=\"text\" data-f=\"name\" data-i=\"" + i + "\" value=\"" + esc(t.name || "") + "\" style=\"width:140px\"></b>" +
+            "<label class=\"check\"><input type=\"checkbox\" data-f=\"hidden\" data-i=\"" + i + "\"" + (t.hidden ? " checked" : "") + "> hidden</label>" +
+            (state.tests.length > 1 ? "<button type=\"button\" class=\"small\" data-del=\"" + i + "\">Remove</button>" : "") + "</div>" +
+            "<div class=\"test-grid\"><div>" + testInputsHtml(t, i) + "</div>" +
+            "<div><div class=\"hint\" style=\"margin:0 0 3px\">The reference gives:</div><div class=\"expected\" id=\"testExp" + i + "\">…</div></div></div>";
+        box.appendChild(card);
+    });
+}
+function readTestField(e) {
+    const el = e.target, i = Number(el.dataset.i);
+    if (isNaN(i) || !state.tests[i]) return false;
+    const t = state.tests[i];
+    switch (el.dataset.f) {
+        case "name": t.name = el.value; break;
+        case "hidden": t.hidden = el.checked; break;
+        case "answers": t.answers = el.value.split("\n").map(s => s.trim()).filter(s => s !== ""); break;
+        case "var": t.vars = t.vars || {}; t.vars[el.dataset.name] = el.value; break;
+        case "list": t.lists = t.lists || {}; t.lists[el.dataset.name] = el.value; break;
+        case "seed": t.seed = Number(el.value) || 1; break;
+        default: return false;
+    }
+    return true;
+}
+$("testsBox").addEventListener("input", e => { if (readTestField(e)) changed(); });
+$("testsBox").addEventListener("change", e => { if (readTestField(e)) changed(); });
+$("testsBox").addEventListener("click", e => {
+    const d = e.target.dataset && e.target.dataset.del;
+    if (d === undefined) return;
+    state.tests.splice(Number(d), 1);
+    renderTests();
+    changed();
+});
+$("addTest").onclick = () => {
+    const last = state.tests[state.tests.length - 1] || {};
+    state.tests.push({ name: String(state.tests.length + 1), vars: {}, lists: {}, answers: (last.answers || []).slice(), seed: (Number(last.seed) || 0) + 1, hidden: false });
+    renderTests();
+    changed();
+};
+
+/* the outputs of a run as the teacher reads them */
+function outputText(o) {
+    const lines = [];
+    if (o.status === "timeout") lines.push("⚠ The program did not stop.");
+    if (o.status === "noAnswer") lines.push("⚠ It asked more questions than the answers given.");
+    if (o.status === "error") lines.push("⚠ Error: " + o.message);
+    if (o.say) lines.push(o.say.length ? "says:\n  " + ScratchQ.sayText(o.say, "", "\n  ") : "says: (nothing)");
+    Object.keys(o.vars || {}).forEach(n => lines.push(n + " = " + o.vars[n]));
+    Object.keys(o.lists || {}).forEach(n => lines.push("list " + n + " = [" + (o.lists[n] || []).join(", ") + "]"));
+    if (!lines.length) lines.push("(nothing is checked - choose what is checked above)");
+    return lines.join("\n");
+}
+
+/* trace: the items, the one run's data, the correct answer */
+function renderTraceSection() {
+    const items = state.trace.items;
+    const has = (k, n) => items.some(it => it.kind === k && (k === "say" || it.name === n));
+    let html = "<label class=\"check\"><input type=\"checkbox\" data-item=\"say\"" + (has("say") ? " checked" : "") + "> <span>What the sprite says (all the lines, in order)</span></label>";
+    varNames(state.reference).forEach(n => {
+        html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"var\" data-name=\"" + esc(n) + "\"" + (has("var", n) ? " checked" : "") + "> <span>The final value of <b>" + esc(n) + "</b></span></label>";
+    });
+    listNames(state.reference).forEach(n => {
+        html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"list\" data-name=\"" + esc(n) + "\"" + (has("list", n) ? " checked" : "") + "> <span>The final contents of the list <b>" + esc(n) + "</b></span></label>";
+    });
+    $("traceItemsBox").innerHTML = html;
+    $("traceTestBox").innerHTML = state.tests[0] ? testInputsHtml(state.tests[0], 0) : "";
+}
+$("traceItemsBox").addEventListener("change", () => {
+    state.trace.items = Array.from($("traceItemsBox").querySelectorAll("input[data-item]:checked"))
+        .map(i => i.dataset.item === "say" ? { kind: "say" } : { kind: i.dataset.item, name: i.dataset.name });
+    changed();
+});
+$("traceTestBox").addEventListener("input", e => { if (readTestField(e)) changed(); });
+$("traceTestBox").addEventListener("change", e => { if (readTestField(e)) changed(); });
+
+/* the student attempt: an editor as the student's (program) or the answer form (trace), graded live */
+let attemptProgram = null, attemptSeq = 0;
+function renderAttempt(reset) {
+    const host = $("attemptHost");
+    const mine = ++attemptSeq;
+    if (editors.attempt) { try { editors.attempt.dispose(); } catch (e) { /* gone */ } editors.attempt = null; }
+    host.textContent = "";
+    $("attemptResult").textContent = "";
+    if (reset) attemptProgram = null;
+    if (state.kind === "trace") {
+        ScratchQ.Question.mount(host, Object.assign(checkConfig(), { review: {} }), {
+            onChange: (st, score) => showAttemptResult(st ? { grade: st.grade, feedback: st.feedback } : null)
+        });
+        return;
+    }
+    const box = document.createElement("div");
+    box.className = "editor-box";
+    host.appendChild(box);
+    ScratchQ.Editor.create(box, {
+        ScratchBlocks: SB, program: attemptProgram || ScratchQ.Question.startingProgram(checkConfig()), palette: state.palette,
+        locks: state.locks, enforceLocks: true, height: state.height,
+        onChange: p => { attemptProgram = p; gradeAttempt(); }
+    }).then(ed => { if (mine === attemptSeq) { editors.attempt = ed; gradeAttempt(); } else ed.dispose(); });
+}
+$("attemptReset").onclick = () => renderAttempt(true);
+
+let checker = null;
+function currentChecker() { if (!checker) checker = ScratchQ.Checker.create(checkConfig()); return checker; }
+
+let gradeSeq = 0;
+function gradeAttempt() {
+    if (state.kind === "trace" || !editors.attempt) return;
+    const p = editors.attempt.getProgram();
+    const mine = ++gradeSeq;
+    if (ScratchQ.sameProgram(p, ScratchQ.Question.startingProgram(checkConfig()))) {
+        showAttemptResult(null, "The starting program, untouched: no answer (not graded).");
+        return;
+    }
+    currentChecker().grade(p, uiLanguage()).then(g => { if (mine === gradeSeq) showAttemptResult(g); });
+}
+function uiLanguage() { return state.language === "system" ? "he" : state.language; }
+function showAttemptResult(g, note) {
+    const box = $("attemptResult");
+    if (!g) { box.innerHTML = "<div class=\"status info\">" + esc(note || "No answer yet.") + "</div>"; return; }
+    const lines = String(g.feedback || "").split("\n");
+    let html = "<div class=\"grade-line\">Grade: " + Math.round(g.grade * 100) / 100 + "%</div>" +
+        "<div class=\"status\" dir=\"auto\">" + esc(lines.join("\n")) + "</div>";
+    if (g.tests && g.tests.length) {
+        html += "<table class=\"result-table\"><tr><th>Test</th><th></th><th>Expected (the reference)</th><th>The attempt gives</th></tr>";
+        g.tests.forEach(t => {
+            html += "<tr><td>" + esc(t.name) + (t.hidden ? " (hidden)" : "") + "</td><td class=\"" + (t.pass ? "pass\">✓" : "fail\">✗") + "</td>" +
+                "<td class=\"mono\">" + esc(outputText(t.expected)) + "</td><td class=\"mono\">" + esc(outputText(t.got)) + "</td></tr>";
+        });
+        html += "</table>";
+    }
+    if (g.mistake !== null && g.mistake !== undefined) html += "<div class=\"status warn\">Matched common mistake " + (g.mistake + 1) + " (tab 3).</div>";
+    box.innerHTML = html;
+}
+
+/* ================================================================
+   Tab 3: the starting program, the mistakes
+   ================================================================ */
+function initialChanged(program) {
+    state.initial = program;
+    if (editors.init) state.locks = editors.init.getLocks();
+    changed();
+}
+$("initFromRef").onclick = () => {
+    if (state.initial && !confirm("Replace the starting program with a copy of the reference?")) return;
+    state.initial = clone(state.reference);
+    state.locks = {};
+    editors.init.setProgram(state.initial, {});
+    renderAttempt(true);
+    changed();
+};
+$("initEmpty").onclick = () => {
+    if (state.initial && !confirm("Replace the starting program with an empty one (only the green flag)?")) return;
+    state.initial = newProgram();
+    /* the reference's variables stay available to the student */
+    state.initial.variables = clone(state.reference.variables || []);
+    state.initial.lists = clone(state.reference.lists || []);
+    state.locks = {};
+    editors.init.setProgram(state.initial, {});
+    renderAttempt(true);
+    changed();
+};
+
+function renderMistakes() {
+    Object.keys(editors).filter(k => k.indexOf("mistake") === 0).forEach(k => { try { editors[k].dispose(); } catch (e) { /* gone */ } delete editors[k]; });
+    const box = $("mistakesBox");
+    box.textContent = "";
+    if (!state.mistakes.length) { box.innerHTML = "<p class=\"hint\">No mistakes yet.</p>"; return; }
+    state.mistakes.forEach((m, i) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML =
+            "<div class=\"card-head\"><b>Mistake " + (i + 1) + "</b>" +
+            "<label class=\"field\" style=\"flex-direction:row;align-items:center;gap:6px\">Grade % <input type=\"number\" min=\"0\" max=\"100\" data-m=\"score\" data-i=\"" + i + "\" value=\"" + (typeof m.score === "number" ? m.score : "") + "\" placeholder=\"tests\"></label>" +
+            "<button type=\"button\" class=\"small\" data-mdel=\"" + i + "\">Remove</button></div>" +
+            "<div class=\"editor-box\" id=\"mistakeHost" + i + "\"></div>" +
+            "<div class=\"msg-grid\"><span>עברית</span><input type=\"text\" dir=\"rtl\" data-m=\"he\" data-i=\"" + i + "\" value=\"" + esc((m.message || {}).he || "") + "\">" +
+            "<span>العربية</span><input type=\"text\" dir=\"rtl\" data-m=\"ar\" data-i=\"" + i + "\" value=\"" + esc((m.message || {}).ar || "") + "\">" +
+            "<span>English</span><input type=\"text\" data-m=\"en\" data-i=\"" + i + "\" value=\"" + esc((m.message || {}).en || "") + "\"></div>" +
+            "<div class=\"status\" id=\"mistakeStatus" + i + "\"></div>";
+        box.appendChild(card);
+        ScratchQ.Editor.create($("mistakeHost" + i), {
+            ScratchBlocks: SB, program: m.program, height: 300,
+            onChange: p => { if (state.mistakes[i]) { state.mistakes[i].program = p; changed(); } }
+        }).then(ed => { editors["mistake" + i] = ed; });
+    });
+}
+$("mistakesBox").addEventListener("input", e => {
+    const el = e.target, i = Number(el.dataset.i), m = state.mistakes[i];
+    if (!m || !el.dataset.m) return;
+    if (el.dataset.m === "score") m.score = el.value === "" ? null : Math.max(0, Math.min(100, Number(el.value)));
+    else { m.message = m.message || {}; m.message[el.dataset.m] = el.value; }
+    changed();
+});
+$("mistakesBox").addEventListener("click", e => {
+    const d = e.target.dataset && e.target.dataset.mdel;
+    if (d === undefined) return;
+    state.mistakes.splice(Number(d), 1);
+    renderMistakes();
+    changed();
+});
+$("addMistake").onclick = () => {
+    state.mistakes.push({ program: clone(state.reference), message: { he: "", ar: "", en: "" }, score: null });
+    renderMistakes();
+    changed();
+};
+
+/* ================================================================
+   The checks (after every change): the reference's outputs, the starting program, the mistakes, the tab marks
+   ================================================================ */
+let checkTimer = null, checkSeq = 0;
+const issues = { palette: [], checker: [], didactics: [], question: [] };
+function scheduleChecks() {
+    checker = null;
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(runChecks, 350);
+}
+async function runChecks() {
+    const mine = ++checkSeq;
+    const q = checkConfig();
+    const c = ScratchQ.Checker.create(q);
+    checker = c;
+    const found = { palette: [], checker: [], didactics: [], question: [] };
+    const has = ScratchQ.hasScript(state.reference);
+    $("refStatus").className = "status";
+    $("refStatus").textContent = "";
+    if (!has) found.checker.push(["bad", "The reference program has no script that starts with the green flag (with blocks under it)."]);
+
+    if (state.kind === "trace") {
+        if (!state.trace.items.length) found.checker.push(["bad", "Choose at least one thing the student answers (tab 2)."]);
+        const exp = has ? await ScratchQ.Checker.traceExpected(q) : null;
+        if (mine !== checkSeq) return;
+        if (exp) {
+            const lines = exp.items.map(it => it.kind === "say" ? (it.value.length ? "says:\n  " + ScratchQ.sayText(it.value, "", "\n  ") : "says: (nothing)")
+                : (it.kind === "var" ? it.name + " = " + it.value : "list " + it.name + " = [" + it.value.join(", ") + "]"));
+            if (exp.status !== "done") { lines.unshift(exp.status === "timeout" ? "⚠ The program did not stop." : "⚠ The run did not finish (" + exp.status + ")."); found.checker.push(["bad", "The program does not finish its run."]); }
+            $("traceExpected").textContent = lines.join("\n");
+            $("traceExpected").className = "expected" + (exp.status !== "done" ? " bad" : "");
+        } else $("traceExpected").textContent = "";
+    } else {
+        if (state.observe.say === false && !state.observe.vars.length && !state.observe.lists.length) found.checker.push(["bad", "Nothing is checked: choose what is checked (tab 2)."]);
+        if (!(state.palette.blocks || []).length) found.palette.push(["warn", "The palette is empty: the student can only use the blocks of the starting program."]);
+        if (has) {
+            const exp = await c.reference();
+            if (mine !== checkSeq) return;
+            exp.forEach((o, i) => {
+                const el = $("testExp" + i);
+                if (el) { el.textContent = outputText(o); el.className = "expected" + (o.status !== "done" ? " bad" : ""); }
+                if (o.status !== "done") found.checker.push(["bad", "Test " + (state.tests[i].name || i + 1) + ": the reference does not finish (" + o.status + ")."]);
+            });
+            /* the starting program: what it would get; already correct is a warning */
+            const init = state.initial;
+            if (init) {
+                const g = ScratchQ.hasScript(init) ? await c.grade(init, "en") : { grade: 0 };
+                if (mine !== checkSeq) return;
+                const st = $("initStatus");
+                if (g.grade >= 100) {
+                    st.className = "status warn";
+                    st.textContent = "⚠ The starting program already passes every test - the student has nothing to do.";
+                    found.didactics.push(["warn", "The starting program already passes every test."]);
+                } else {
+                    st.className = "status info";
+                    st.textContent = "Graded as an answer, the starting program would get " + Math.round(g.grade) + "% (a student who changes nothing gets no grade: it is not an answer)." +
+                        (g.mistake !== null && g.mistake !== undefined ? "\nIt gives the same outputs as common mistake " + (g.mistake + 1) + " - a student who changes it only a little may get that mistake's message." : "");
+                }
+            } else {
+                $("initStatus").className = "status info";
+                $("initStatus").textContent = "No starting program yet: the student starts from an empty workspace with the reference's variables. Put blocks here, or \"Start from the reference\".";
+            }
+            /* the mistakes: what each gives; equal to the reference or to an earlier one */
+            const mo = await c.mistakes();
+            if (mine !== checkSeq) return;
+            mo.forEach((outs, i) => {
+                const st = $("mistakeStatus" + i);
+                if (!st) return;
+                const sameAsRef = outs.every((o, k) => ScratchQ.Checker.sameObserved(o, exp[k], state.observe));
+                const earlier = mo.slice(0, i).findIndex(prev => prev.every((o, k) => ScratchQ.Checker.sameObserved(o, outs[k], state.observe)));
+                if (sameAsRef) { st.className = "status bad"; st.textContent = "⚠ This program passes every test - it is not a mistake the tests can see. Change the program or add a test."; found.didactics.push(["bad", "Mistake " + (i + 1) + " gives the same outputs as the reference."]); }
+                else if (earlier >= 0) { st.className = "status warn"; st.textContent = "⚠ Same outputs as mistake " + (earlier + 1) + ", which comes first - this one is never used."; found.didactics.push(["warn", "Mistake " + (i + 1) + " is caught by mistake " + (earlier + 1) + "."]); }
+                else { st.className = "status info"; st.textContent = "It gives:\n" + outs.map((o, k) => "test " + (state.tests[k].name || k + 1) + ": " + outputText(o).replace(/:\n\s*/g, ": ").replace(/\n\s*/g, "; ")).join("\n"); }
+                if (!Object.values((state.mistakes[i].message || {})).some(s => s && s.trim())) found.didactics.push(["warn", "Mistake " + (i + 1) + " has no message."]);
+            });
+        }
+    }
+    if (mine !== checkSeq) return;
+    Object.keys(issues).forEach(k => { issues[k] = found[k]; });
+    TABS.forEach(n => {
+        const list = issues[n] || [];
+        $(tabId("tabBtn", n)).classList.toggle("has-issue", list.some(x => x[0] !== "info"));
+    });
+    gradeAttempt();
+    if (currentTab === "question") renderQuestionTab(false);
+    if (currentTab === "file") renderFileTab();
+}
+
+/* ================================================================
+   Tab 4: the file
+   ================================================================ */
+function fileText() {
+    const s = clone(state);
+    s.tool = TOOL; s.formatVersion = 1; s.builderVersion = BUILDER_VERSION;
+    return JSON.stringify(s, null, 2);
+}
+function renderFileTab() {
+    const s = state;
+    const rows = [
+        ["Question", (s.question.questionId || "") + " - " + (s.kind === "trace" ? "trace (write the outcome)" : "program (complete / fix / write)")],
+        ["Student language", s.language],
+        ["Reference", Object.values(s.reference.blocks || {}).filter(b => !Array.isArray(b) && !b.shadow).length + " blocks; variables: " + (varNames(s.reference).join(", ") || "none") + "; lists: " + (listNames(s.reference).join(", ") || "none")],
+        ["Tests", s.kind === "trace" ? "one run" : s.tests.length + " (" + s.tests.filter(t => t.hidden).length + " hidden)"],
+        ["Starting program", s.initial ? Object.values(s.initial.blocks || {}).filter(b => !Array.isArray(b) && !b.shadow).length + " blocks, " + Object.keys(s.locks || {}).length + " locked" : "none (an empty workspace)"],
+        ["Mistakes", String(s.mistakes.length)]
+    ];
+    $("fileSummary").innerHTML = rows.map(r => "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>").join("");
+    $("fileJson").value = fileText();
+}
+function confirmDiscard() { return !dirty || confirm("The exercise has changes that are not saved. Discard them?"); }
+
+function loadState(s, name, handle) {
+    const d = defaultState();
+    state = Object.assign(d, s || {});
+    state.question = Object.assign(defaultState().question, (s && s.question) || {});
+    state.question.review = Object.assign({ grade: true, feedback: true, reference: true }, state.question.review || {});
+    state.observe = Object.assign(defaultState().observe, state.observe || {});
+    state.trace = Object.assign({ items: [{ kind: "say" }] }, state.trace || {});
+    state.palette = Object.assign({ blocks: ScratchQ.Editor.ALL_BLOCKS.slice() }, state.palette || {});
+    if (!state.tests || !state.tests.length) state.tests = defaultState().tests;
+    fileName = name || ""; fileHandle = handle || null; dirty = false;
+    renderAll();
+}
+
+/* the question code -> the exercise: cfg.exercise holds the builder's settings, cfg itself the programs */
+function stateFromCode(text) {
+    const m = /ScratchQ\.Question\.mountStackJs\(stack_js,(\{.*\})\);\[\[\/script\]\]/.exec(text) || /^var CONFIG = (\{.*\});$/m.exec(text);
+    if (!m) return null;
+    const cfg = JSON.parse(m[1]);
+    if (!cfg || cfg.tool !== QUESTION_TOOL || !cfg.exercise) throw new Error("This is not the code of a Scratch question.");
+    const ex = cfg.exercise;
+    ex.reference = cfg.reference;
+    ex.initial = cfg.initial || null;
+    ex.mistakes = cfg.mistakes || [];
+    return ex;
+}
+function openText(text, name, handle) {
+    let s = null, fromCode = false;
+    try {
+        s = stateFromCode(text);
+        if (s) fromCode = true;
+        else {
+            s = JSON.parse(text);
+            if (!s || s.tool !== TOOL) throw new Error("not a Scratch question file");
+        }
+    } catch (e) { alert("The file could not be opened: " + e.message); return; }
+    loadState(s, fromCode ? "" : name, fromCode ? null : handle);
+    if (fromCode) { showTab("question"); alert("Opened from the question code. Save makes a new exercise file."); }
+}
+async function openFile() {
+    if (!confirmDiscard()) return;
+    if (window.showOpenFilePicker) {
+        try {
+            const [h] = await window.showOpenFilePicker({ types: [{ description: "Scratch question", accept: { "application/json": [FILE_EXT, ".json"], "text/plain": [".txt"], "text/html": [".html"] } }] });
+            const f = await h.getFile();
+            openText(await f.text(), f.name, /\.(scratchq|json)$/i.test(f.name) ? h : null);
+        } catch (e) { if (e.name !== "AbortError") alert("The file could not be opened: " + e.message); }
+        return;
+    }
+    $("fileInput").value = "";
+    $("fileInput").click();
+}
+$("fileInput").addEventListener("change", async () => {
+    const f = $("fileInput").files[0];
+    if (f) openText(await f.text(), f.name, null);
+});
+async function writeFile(data, handle, suggested, types, mime) {
+    if (window.showSaveFilePicker) {
+        if (!handle) handle = await window.showSaveFilePicker({ suggestedName: suggested, types: types });
+        const w = await handle.createWritable();
+        await w.write(data);
+        await w.close();
+        return handle;
+    }
+    const blob = data instanceof Blob ? data : new Blob([data], { type: mime + ";charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = suggested;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    return null;
+}
+function baseName() { return (fileName || state.question.questionId || "question").replace(/\.(scratchq|json|txt|html)$/i, ""); }
+async function saveFile(saveAs) {
+    const suggested = baseName() + FILE_EXT;
+    try {
+        const h = await writeFile(fileText(), saveAs ? null : fileHandle, suggested, [{ description: "Scratch question", accept: { "application/json": [FILE_EXT] } }], "application/json");
+        fileHandle = h;
+        fileName = h ? h.name : suggested;
+        dirty = false;
+        renderFileState();
+    } catch (e) { if (e.name !== "AbortError") alert(e.message); }
+}
+$("fileNew").onclick = () => { if (confirmDiscard()) loadState(null, "", null); };
+$("fileOpen").onclick = openFile;
+$("fileSave").onclick = () => saveFile(false);
+$("fileSaveAs").onclick = () => saveFile(true);
+$("copyJson").onclick = () => copyText($("fileJson").value, "copyJsonMsg");
+document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveFile(e.shiftKey); }
+});
+
+/* .sb3: import through a VM (it reads the zip), export with the VM's own writer */
+$("importSb3").onclick = () => { $("sb3Input").value = ""; $("sb3Input").click(); };
+$("sb3Input").addEventListener("change", async () => {
+    const f = $("sb3Input").files[0];
+    if (!f) return;
+    const st = $("sb3Status");
+    try {
+        const vm = new VirtualMachine();
+        await vm.loadProject(await f.arrayBuffer());
+        const sprites = vm.runtime.targets.filter(t => !t.isStage && t.isOriginal);
+        let sprite = sprites.find(t => Object.values(t.blocks._blocks).some(b => b.opcode === "event_whenflagclicked")) || sprites[0];
+        if (sprites.length > 1) {
+            const names = sprites.map((t, i) => (i + 1) + ". " + t.getName()).join("\n");
+            const pick = prompt("The project has several sprites. Which one's scripts?\n" + names, String(sprites.indexOf(sprite) + 1));
+            if (pick === null) return;
+            sprite = sprites[Math.max(0, Math.min(sprites.length - 1, Number(pick) - 1))] || sprite;
+        }
+        vm.setEditingTarget(sprite.id);
+        const json = JSON.parse(vm.toJSON());
+        const t = json.targets.find(x => x.name === sprite.getName() && !x.isStage);
+        const stage = json.targets.find(x => x.isStage);
+        const program = { v: 1, variables: [], lists: [], blocks: t.blocks || {} };
+        [stage, t].forEach(x => {
+            Object.keys(x.variables || {}).forEach(id => program.variables.push({ id, name: x.variables[id][0], value: x.variables[id][1] }));
+            Object.keys(x.lists || {}).forEach(id => program.lists.push({ id, name: x.lists[id][0], items: x.lists[id][1] || [] }));
+        });
+        const known = new Set(ScratchQ.Editor.ALL_BLOCKS.concat(["math_number", "math_positive_number", "math_whole_number", "math_integer", "math_angle", "text",
+            "data_variable", "data_setvariableto", "data_changevariableby", "data_showvariable", "data_hidevariable", "data_listcontents", "data_addtolist", "data_deleteoflist",
+            "data_deletealloflist", "data_insertatlist", "data_replaceitemoflist", "data_itemoflist", "data_itemnumoflist", "data_lengthoflist", "data_listcontainsitem",
+            "operator_mathop_menu", "control_stop"]));
+        const outside = new Set();
+        Object.values(program.blocks).forEach(b => { if (b && !Array.isArray(b) && !known.has(b.opcode) && !/_menu$/.test(b.opcode)) outside.add(b.opcode); });
+        if ($("importTarget").value === "initial") {
+            state.initial = program; state.locks = {};
+            editors.init.setProgram(program, {});
+        } else {
+            state.reference = program;
+            editors.ref.setProgram(program);
+            referenceChanged(program);
+        }
+        renderAttempt(true);
+        changed();
+        st.className = "status " + (outside.size ? "warn" : "ok");
+        st.textContent = "Imported the scripts of \"" + sprite.getName() + "\"." + (outside.size ? "\n⚠ Blocks outside the supported language (they may not run as in Scratch): " + Array.from(outside).join(", ") : "");
+    } catch (e) {
+        st.className = "status bad";
+        st.textContent = "The file could not be imported: " + e.message;
+    }
+});
+async function exportSb3(program, suffix) {
+    const st = $("sb3Status");
+    try {
+        const vm = new VirtualMachine();
+        await vm.loadProject(ScratchQ.toProject(program || newProgram(), {}));
+        /* make the sprite visible in Scratch (hidden only for the headless runs) */
+        vm.runtime.targets.forEach(t => { if (!t.isStage) t.setVisible(true); });
+        const blob = await vm.saveProjectSb3();
+        await writeFile(blob, null, baseName() + suffix + ".sb3", [{ description: "Scratch project", accept: { "application/x.scratch.sb3": [".sb3"] } }], "application/x.scratch.sb3");
+        st.className = "status ok";
+        st.textContent = "Exported.";
+    } catch (e) {
+        if (e.name === "AbortError") return;
+        st.className = "status bad";
+        st.textContent = "The export failed: " + e.message;
+    }
+}
+$("exportRef").onclick = () => exportSb3(state.reference, "-reference");
+$("exportInit").onclick = () => exportSb3(state.initial, "-start");
+
+/* ================================================================
+   Tab 5: the question code
+   ================================================================ */
+function readQuestionSettings() {
+    const q = state.question;
+    q.target = document.querySelector("input[name=target]:checked").value;
+    /* it goes into an HTML comment and a title: no < > & " [ ] { } and no -- */
+    q.questionId = $("questionId").value.trim().replace(/[<>&"\[\]{}]/g, "").replace(/-{2,}/g, "-") || "scratch1";
+    q.inputs = { score: $("inputScore").value.trim() || "ans1", state: $("inputState").value.trim() || "ans2" };
+    q.review = { grade: $("reviewGrade").checked, feedback: $("reviewFeedback").checked, reference: $("reviewReference").checked };
+    q.libraryUrl = $("libraryUrl").value.trim() || DEFAULT_LIBRARY;
+    return q;
+}
+function writeQuestionSettings() {
+    const q = state.question;
+    document.querySelectorAll("input[name=target]").forEach(r => { r.checked = r.value === q.target; });
+    $("questionId").value = q.questionId;
+    $("inputScore").value = q.inputs.score;
+    $("inputState").value = q.inputs.state;
+    $("reviewGrade").checked = q.review.grade !== false;
+    $("reviewFeedback").checked = q.review.feedback !== false;
+    $("reviewReference").checked = q.review.reference !== false;
+    $("libraryUrl").value = q.libraryUrl;
+}
+function libraryFile(name) { return state.question.libraryUrl.replace(/\/*$/, "/") + name; }
+
+/* what scratchq-question.js reads: only what it needs, and the exercise for opening the code again */
+function questionConfig() {
+    const q = state.question;
+    const c = checkConfig();
+    const cfg = { tool: QUESTION_TOOL, formatVersion: 1, questionId: q.questionId, language: state.language, kind: state.kind,
+        review: q.review, reference: c.reference, height: state.height };
+    if (q.target === "stack") cfg.inputs = q.inputs;
+    if (state.kind === "trace") { cfg.tests = c.tests.slice(0, 1); cfg.trace = c.trace; }
+    else {
+        cfg.initial = c.initial; cfg.locks = c.locks; cfg.palette = c.palette; cfg.tests = c.tests; cfg.observe = c.observe;
+        if (c.mistakes.length) cfg.mistakes = c.mistakes;
+    }
+    const ex = clone(state);
+    delete ex.reference; delete ex.initial; delete ex.mistakes;           // in cfg already - restored on open
+    cfg.exercise = ex;
+    return cfg;
+}
+
+/*
+ * The JSON inside STACK's CASText: "[[" / "]]" would start or end a STACK block, "{@" / "{#" an expression, and Moodle
+ * may escape < > &. Inside strings: \u escapes (JSON.parse restores them). Outside strings - Scratch's blocks are
+ * nested arrays, [10,"0"]] - a space between the two brackets (the math question's code had no nested arrays).
+ */
+function codeJson(cfg) {
+    const json = JSON.stringify(cfg);
+    const ESC = { "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" };
+    let out = "", inString = false;
+    for (let i = 0; i < json.length; i += 1) {
+        const c = json[i], prev = out.length ? json[i - 1] : "";
+        if (inString) {
+            if (c === "\\") { out += c + json[i + 1]; i += 1; continue; }
+            if (c === "\"") inString = false;
+            if (ESC[c]) { out += ESC[c]; continue; }
+            if ((c === "[" && prev === "[") || (c === "]" && prev === "]")) { out += c === "[" ? "\\u005b" : "\\u005d"; continue; }
+            if ((c === "@" || c === "#") && prev === "{") { out += c === "@" ? "\\u0040" : "\\u0023"; continue; }
+            out += c;
+            continue;
+        }
+        if (c === "\"") inString = true;
+        if ((c === "[" && prev === "[") || (c === "]" && prev === "]")) out += " ";
+        out += c;
+    }
+    return out;
+}
+/*
+ * The STACK question text: the inputs, hidden (the frame cannot hide them), and an [[iframe]] that loads the Scratch
+ * VM and the libraries and starts the question. One line (an editor's auto-format may turn line breaks into <br />).
+ */
+function stackCode(cfg) {
+    const q = state.question;
+    const inputs = [q.inputs.score, q.inputs.state].map(n => "[[input:" + n + "]] [[validation:" + n + "]]").join(" ");
+    return [
+        "<!-- Scratch question \"" + q.questionId + "\" (code version " + CODE_VERSION + "). Made with the Scratch question builder: to change it, open this code (or the exercise file) in the builder. Do not edit by hand. -->",
+        "<div style=\"display:none\">" + inputs + "</div>",
+        "[[iframe width=\"100%\" height=\"" + (state.height + 40) + "px\" scrolling=\"false\" title=\"Scratch question\"]]",
+        "[[script src=\"" + VM_URL + "\"/]]",
+        "[[script src=\"" + libraryFile("scratchq.js") + "\"/]]",
+        "[[script src=\"" + libraryFile("scratchq-editor.js") + "\"/]]",
+        "[[script src=\"" + libraryFile("scratchq-question.js") + "\"/]]",
+        "<div id=\"scratchq\"></div>",
+        "[[script type=\"module\"]]",
+        "import {stack_js} from '[[cors src=\"stackjsiframe.js\"/]]';",
+        "ScratchQ.Question.mountStackJs(stack_js," + codeJson(cfg) + ");",
+        "[[/script]]",
+        "[[/iframe]]"
+    ].join("");
+}
+function htmlCode(cfg) {
+    const q = state.question;
+    const json = JSON.stringify(cfg).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+    const lang = state.language === "system" ? "he" : state.language;
+    return [
+        "<!DOCTYPE html>",
+        "<html lang=\"" + lang + "\" dir=\"" + (lang === "en" ? "ltr" : "rtl") + "\">",
+        "<head>",
+        "<meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>" + esc(q.questionId) + "</title>",
+        "<!-- Scratch question \"" + q.questionId + "\" (code version " + CODE_VERSION + ", stand-alone page). Made with the Scratch question builder: to change it, open this file in the builder. -->",
+        "<" + "script src=\"" + VM_URL + "\"><" + "/script>",
+        "<" + "script src=\"" + esc(libraryFile("scratchq.js")) + "\"><" + "/script>",
+        "<" + "script src=\"" + esc(libraryFile("scratchq-editor.js")) + "\"><" + "/script>",
+        "<" + "script src=\"" + esc(libraryFile("scratchq-question.js")) + "\"><" + "/script>",
+        "<style>body{font-family:Arial,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;color:#1d2733}.actions{margin:14px 0}.actions button{font-size:16px;padding:6px 18px;margin-inline-end:8px;cursor:pointer}</style>",
+        "</head>",
+        "<body>",
+        "<!-- the question text: write it here -->",
+        "<p></p>",
+        "<div id=\"question\"></div>",
+        "<div class=\"actions\"><button type=\"button\" id=\"submit\"></button><button type=\"button\" id=\"again\" hidden></button></div>",
+        "<" + "script>",
+        "/*",
+        " * The question's configuration (made by the Scratch question builder - change it there, not here).",
+        " * Connecting the question to another system - ScratchQ.Question.mount(element, CONFIG, options):",
+        " *   options.state     the saved state to start from (what onChange gave), or null",
+        " *   options.readOnly  true: the review - the submitted answer with its grade and feedback",
+        " *   options.onChange  function (state, score) after every change: state {v, program | answers, grade, feedback}",
+        " *                     (null: no answer) - store it; score 0 to 1",
+        " */",
+        "var CONFIG = " + json + ";",
+        "var TEXT = {he:{submit:\"הגשה\",again:\"ניסיון נוסף\"}, ar:{submit:\"إرسال\",again:\"محاولة أخرى\"}, en:{submit:\"Submit\",again:\"Try again\"}};",
+        "var words = TEXT[document.documentElement.lang] || TEXT.en;",
+        "var box = document.getElementById(\"question\"), submit = document.getElementById(\"submit\"), again = document.getElementById(\"again\");",
+        "var saved = null;",
+        "submit.textContent = words.submit;",
+        "again.textContent = words.again;",
+        "function show(readOnly) {",
+        "  ScratchQ.Question.mount(box, CONFIG, { state: saved, readOnly: readOnly, onChange: function (state) { saved = state; } });",
+        "  submit.hidden = readOnly;",
+        "  again.hidden = !readOnly;",
+        "}",
+        "submit.onclick = function () { show(true); };",
+        "again.onclick = function () { show(false); };",
+        "show(false);",
+        "<" + "/script>",
+        "</body>",
+        "</html>",
+        ""
+    ].join("\n");
+}
+
+/* the state input's model answer: the reference as a whole saved state (Moodle's "Fill in correct responses") */
+async function modelState() {
+    if (state.kind === "trace") {
+        const exp = await ScratchQ.Checker.traceExpected(checkConfig());
+        const answers = { say: [], vars: {}, lists: {} };
+        exp.items.forEach(it => {
+            if (it.kind === "say") answers.say = it.value.slice();
+            else if (it.kind === "var") answers.vars[it.name] = String(it.value);
+            else answers.lists[it.name] = it.value.map(String);
+        });
+        return { v: 1, answers, grade: 100, feedback: "" };
+    }
+    return { v: 1, program: state.reference, grade: 100, feedback: "" };
+}
+
+function stackHelpHtml() {
+    const q = state.question, s = esc(q.inputs.score), t = esc(q.inputs.state);
+    return "<p>The code already contains the two inputs, in a hidden box. Paste it into the question text as it is (plain-text editor or the HTML source view); remove STACK's default " +
+        "<code>[[input:ans1]] [[validation:ans1]]</code> and do <b>not</b> add the inputs again. Then set each input in its section of the question form:</p>" +
+        "<table><tr><th></th><th>" + s + " - the score</th><th>" + t + " - the saved answer</th></tr>" +
+        "<tr><td>Input type</td><td>Numerical</td><td>String</td></tr>" +
+        "<tr><td>Model answer</td><td><code>1</code></td><td><code>" + STACK_MODEL_VAR + "</code> - from the question variables (below)</td></tr>" +
+        "<tr><td>Forbid float</td><td>No</td><td>-</td></tr>" +
+        "<tr><td>Student must verify</td><td>No</td><td>No</td></tr>" +
+        "<tr><td>Show the validation</td><td><b>No</b></td><td><b>No</b></td></tr>" +
+        "<tr><td>Extra options</td><td><code>hideanswer</code></td><td><code>hideanswer</code></td></tr></table>" +
+        "<p><b>The potential response tree (PRT).</b> " + s + " holds the score from 0 to 1, and the PRT gives it as the mark: one node - SAns <code>" + s +
+        "</code>, TAns <code>1</code>, answer test <code>AlgEquiv</code>; true branch: score <code>1</code>; false branch: score <code>" + s + "</code>. " + t +
+        " needs no PRT: STACK saves it and the question reads it back. The saved answer is <code>sq1:</code> followed by letters and digits (base64), so STACK accepts it however long the program is.</p>" +
+        "<p><b>Question variables.</b> Paste the line below into the question's <i>Question variables</i>. It is the correct answer as the question saves it, so " +
+        "Moodle's <i>Fill in correct responses</i> shows it. Copy it again after a change of the reference.</p>" +
+        "<p><b>The library folder</b> must hold scratchq.js, scratchq-editor.js and scratchq-question.js. The Scratch VM (scratch-vm 4.8.115, ~5.7 MB, loaded once and cached) " +
+        "and scratch-blocks come from jsDelivr.</p>";
+}
+
+function renderIssues() {
+    const list = [].concat(issues.palette, issues.checker, issues.didactics);
+    if (state.question.target === "stack" && state.question.inputs.score === state.question.inputs.state) list.push(["bad", "The score input and the state input need two different names."]);
+    $("issues").innerHTML = list.length
+        ? "<b>To check before use:</b><ul>" + list.map(x => "<li class=\"" + x[0] + "\">" + esc(x[1]) + "</li>").join("") + "</ul>"
+        : "<span class=\"status ok\">No problems found.</span>";
+    $("tabBtnQuestion").classList.toggle("has-issue", list.some(x => x[0] === "bad"));
+}
+
+let trySaved = null, tryReadOnly = false;
+function startTry(readOnly) {
+    tryReadOnly = readOnly;
+    const host = $("tryHost");
+    host.textContent = "";
+    const cfg = questionConfig();
+    ScratchQ.Question.mount(host, cfg, {
+        state: trySaved, readOnly: readOnly,
+        onChange: (st, score) => { trySaved = st ? ScratchQ.encodeState(st) : null; $("tryState").value = trySaved ? trySaved + "\n(score " + ScratchQ.Question.scoreText(score) + ")" : ""; }
+    });
+    $("trySubmit").hidden = readOnly;
+    $("tryAgain").hidden = !readOnly;
+}
+$("trySubmit").onclick = () => startTry(true);
+$("tryAgain").onclick = () => startTry(false);
+
+async function renderQuestionTab(restart) {
+    const q = readQuestionSettings();
+    document.querySelectorAll(".q-stack").forEach(el => { el.hidden = q.target !== "stack"; });
+    const cfg = questionConfig();
+    $("code").value = q.target === "stack" ? stackCode(cfg) : htmlCode(cfg);
+    $("codeHint").textContent = q.target === "stack"
+        ? "Paste this into the STACK question text, in the plain-text editor or the HTML (source code) view. It contains the STACK inputs (hidden). The question runs in a STACK-JS frame."
+        : "A complete web page: the question with Submit / Try again. Save it as an .html file; write the question text where the page says so.";
+    $("stackHelp").innerHTML = stackHelpHtml();
+    renderIssues();
+    try { $("modelVar").value = STACK_MODEL_VAR + ": \"" + ScratchQ.encodeState(await modelState()) + "\";"; }
+    catch (e) { $("modelVar").value = ""; }
+    if (restart) { trySaved = null; $("tryState").value = ""; startTry(false); }
+}
+let qTimer = null;
+$("tabQuestion").addEventListener("input", e => {
+    if (e.target.closest("#tryHost") || e.target.id === "code" || e.target.id === "modelVar") return;
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => { readQuestionSettings(); changed(); renderQuestionTab(false); }, 250);
+});
+$("tabQuestion").addEventListener("change", e => {
+    if (e.target.closest("#tryHost")) return;
+    readQuestionSettings(); changed(); renderQuestionTab(false);
+});
+function copyText(text, msgId) {
+    const done = ok => { $(msgId).textContent = ok ? "Copied." : "Copy failed - select the text and copy it."; setTimeout(() => { $(msgId).textContent = ""; }, 2500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => done(true), () => done(false)); else done(false);
+}
+$("copyCode").onclick = () => copyText($("code").value, "copyCodeMsg");
+$("copyModel").onclick = () => copyText($("modelVar").value, "copyModelMsg");
+$("saveCode").onclick = async () => {
+    const html = state.question.target === "html";
+    try {
+        await writeFile($("code").value, null, baseName() + (html ? ".html" : ".stack.txt"),
+            html ? [{ description: "Web page", accept: { "text/html": [".html"] } }] : [{ description: "Text", accept: { "text/plain": [".txt"] } }],
+            html ? "text/html" : "text/plain");
+    } catch (e) { if (e.name !== "AbortError") alert(e.message); }
+};
+
+/* ================================================================
+   Start
+   ================================================================ */
+async function renderAll() {
+    $("language").value = state.language;
+    $("height").value = state.height;
+    writeQuestionSettings();
+    renderPaletteChoices();
+    renderObserve();
+    renderTests();
+    renderTraceSection();
+    renderFileState();
+    Object.keys(editors).forEach(k => { try { editors[k].dispose(); } catch (e) { /* gone */ } delete editors[k]; });
+    const [ref, init] = await Promise.all([
+        ScratchQ.Editor.create($("refHost"), { ScratchBlocks: SB, program: state.reference, height: state.height, onChange: p => referenceChanged(p) }),
+        ScratchQ.Editor.create($("initHost"), { ScratchBlocks: SB, program: ScratchQ.Question.startingProgram(checkConfig()), locks: state.locks, lockMenu: true, height: state.height,
+            onChange: p => initialChanged(p), onLocksChange: l => { state.locks = l; renderAttempt(true); changed(); } })
+    ]);
+    editors.ref = ref;
+    editors.init = init;
+    renderMistakes();
+    renderKind();
+    showTab(currentTab);
+    scheduleChecks();
+}
+
+(async function start() {
+    try {
+        SB = await import(ScratchQ.Editor.SCRATCH_BLOCKS_URL);
+        window.ScratchBlocks = SB;
+    } catch (e) {
+        document.body.innerHTML = "<main><section><h2>scratch-blocks could not be loaded</h2><p>" + esc(e.message) + "</p><p>The builder needs the network (jsDelivr).</p></section></main>";
+        return;
+    }
+    currentTab = preference("tab") || "checker";
+    loadState(null, "", null);
+    /* the test hook (tests/builder-tests.js) */
+    window.builder = { get state() { return state; }, isDirty: () => dirty, editors, showTab, loadState, runChecks, questionConfig, stackCode, htmlCode, openText, fileText, modelState, issues };
+    if (/[?&]selftest/.test(location.search)) {
+        const s = document.createElement("script");
+        s.src = "tests/builder-tests.js";
+        document.body.appendChild(s);
+    }
+})();
+</script>
+</body>
+</html>

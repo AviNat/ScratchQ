@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ScratchQ runner tests</title>
+<script src="https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js"></script>
+<script src="../scratchq.js"></script>
+<script src="program-helper.js"></script>
+</head>
+<body>
+<pre id="out">running…</pre>
+<script>
+"use strict";
+const R = ScratchQ.Runner;
+const GF = ["event_whenflagclicked"];
+const out = { passed: 0, failed: 0, lines: [] };
+function ok(cond, name, detail) {
+    if (cond) out.passed += 1; else out.failed += 1;
+    out.lines.push((cond ? "ok   " : "FAIL ") + name + (cond || detail === undefined ? "" : "  -> " + JSON.stringify(detail)));
+}
+const said = r => r.say.map(s => (s.type === "say" ? "" : s.type + ":") + s.text);
+
+const cases = [
+    ["loop + join", prog({ vars: { sum: 99 } }, [GF,
+        ["data_setvariableto", { VALUE: 0 }, { VARIABLE: "sum" }],
+        ["control_repeat", { TIMES: 5, SUBSTACK: [["data_changevariableby", { VALUE: 2 }, { VARIABLE: "sum" }]] }],
+        ["looks_say", { MESSAGE: ["operator_join", { STRING1: "sum=", STRING2: { v: "sum" } }] }]]), {},
+        r => r.status === "done" && said(r).join("|") === "sum=10" && r.vars.sum === 10],
+
+    ["ask / answer", prog({ vars: { n: 0 } }, [GF,
+        ["sensing_askandwait", { QUESTION: "n?" }],
+        ["data_setvariableto", { VALUE: ["sensing_answer"] }, { VARIABLE: "n" }],
+        ["looks_say", { MESSAGE: ["operator_multiply", { NUM1: { v: "n" }, NUM2: 2 }] }]]), { answers: ["21"] },
+        r => r.status === "done" && said(r).join("|") === "ask:n?|42" && r.vars.n === "21"],
+
+    ["two asks", prog({ vars: { a: 0, b: 0 } }, [GF,
+        ["sensing_askandwait", { QUESTION: "a?" }],
+        ["data_setvariableto", { VALUE: ["sensing_answer"] }, { VARIABLE: "a" }],
+        ["sensing_askandwait", { QUESTION: "b?" }],
+        ["data_setvariableto", { VALUE: ["sensing_answer"] }, { VARIABLE: "b" }],
+        ["looks_say", { MESSAGE: ["operator_add", { NUM1: { v: "a" }, NUM2: { v: "b" } }] }]]), { answers: [3, 4] },
+        r => r.status === "done" && said(r).join("|") === "ask:a?|ask:b?|7"],
+
+    ["no answer left", prog({}, [GF, ["sensing_askandwait", { QUESTION: "x?" }], ["looks_say", { MESSAGE: "after" }]]), {},
+        r => r.status === "noAnswer"],
+
+    ["say for secs: virtual clock", prog({}, [GF,
+        ["looks_sayforsecs", { MESSAGE: "hi", SECS: 2 }],
+        ["control_wait", { DURATION: 3 }],
+        ["looks_thinkforsecs", { MESSAGE: "hmm", SECS: 1 }],
+        ["looks_say", { MESSAGE: "bye" }]]), {},
+        r => r.status === "done" && said(r).join("|") === "hi|think:hmm|bye" && r.seconds >= 6 && r.seconds < 6.5],
+
+    ["forever -> timeout", prog({ vars: { x: 0 } }, [GF,
+        ["control_forever", { SUBSTACK: [["data_changevariableby", { VALUE: 1 }, { VARIABLE: "x" }]] }]]), {},
+        r => r.status === "timeout" && r.vars.x > 100],
+
+    ["forever + stop", prog({ vars: { x: 0 } }, [GF,
+        ["control_forever", { SUBSTACK: [
+            ["data_changevariableby", { VALUE: 1 }, { VARIABLE: "x" }],
+            ["control_if", { CONDITION: ["operator_equals", { OPERAND1: { v: "x" }, OPERAND2: 50 }],
+                SUBSTACK: [["control_stop", {}, { STOP_OPTION: "all" }]] }]] }]]), {},
+        r => r.status === "done" && r.vars.x === 50],
+
+    ["casting traps", prog({}, [GF,
+        ["looks_say", { MESSAGE: ["operator_lt", { OPERAND1: "10", OPERAND2: "9" }] }],
+        ["looks_say", { MESSAGE: ["operator_add", { NUM1: 0.1, NUM2: 0.2 }] }],
+        ["looks_say", { MESSAGE: ["operator_equals", { OPERAND1: "Apple", OPERAND2: "apple" }] }],
+        ["looks_say", { MESSAGE: ["operator_add", { NUM1: "10", NUM2: "abc" }] }],
+        ["looks_say", { MESSAGE: ["operator_mod", { NUM1: -7, NUM2: 3 }] }],
+        ["looks_say", { MESSAGE: ["operator_letter_of", { LETTER: 1, STRING: "שלום" }] }]]), {},
+        r => said(r).join("|") === "false|0.30|true|10|2|ש"],
+
+    ["test values replace the program's", prog({ vars: { n: 1 }, lists: { L: [1] } }, [GF,
+        ["looks_say", { MESSAGE: ["operator_join", { STRING1: { v: "n" }, STRING2: ["data_lengthoflist", {}, { LIST: "L" }] }] }]]),
+        { vars: { n: 7 }, lists: { L: [5, 6, 7] } },
+        r => said(r).join("|") === "73"],
+
+    ["lists", prog({ lists: { L: [] } }, [GF,
+        ["data_deletealloflist", {}, { LIST: "L" }],
+        ["control_repeat", { TIMES: 3, SUBSTACK: [["data_addtolist", { ITEM: "x" }, { LIST: "L" }]] }],
+        ["data_replaceitemoflist", { INDEX: 2, ITEM: "y" }, { LIST: "L" }]]), {},
+        r => r.lists.L.join(",") === "x,y,x"],
+];
+
+async function main() {
+    for (const [name, program, test, check] of cases) {
+        let r;
+        const t = performance.now();
+        try { r = await R.run(program, test); } catch (e) { r = { status: "exception", message: e.message, say: [] }; }
+        ok(check(r), name + " (" + Math.round(performance.now() - t) + " ms)", r);
+    }
+    /* pick random: the same seed gives the same numbers, another seed (almost surely) others */
+    const rnd = prog({}, [GF, ["control_repeat", { TIMES: 5, SUBSTACK: [["looks_say", { MESSAGE: ["operator_random", { FROM: 1, TO: 1000 }] }]] }]]);
+    const a = said(await R.run(rnd, { seed: 7 })).join(","), b = said(await R.run(rnd, { seed: 7 })).join(","), c = said(await R.run(rnd, { seed: 8 })).join(",");
+    ok(a === b && a !== c && a.split(",").length === 5, "seeded random", { a, b, c });
+    /* speed: a loop of 10000 iterations */
+    const t0 = performance.now();
+    const big = await R.run(prog({ vars: { i: 0 } }, [GF, ["control_repeat", { TIMES: 10000, SUBSTACK: [["data_changevariableby", { VALUE: 1 }, { VARIABLE: "i" }]] }]]), {});
+    const ms = Math.round(performance.now() - t0);
+    ok(big.status === "done" && big.vars.i === 10000, "10000 iterations (" + ms + " ms, " + big.ticks + " frames)", big);
+    /* state encoding round trip with Hebrew */
+    const st = { v: 1, program: rnd, feedback: "נכון − מצוין" };
+    const enc = ScratchQ.encodeState(st);
+    ok(/^sq1:[A-Za-z0-9+/=]+$/.test(enc) && JSON.stringify(ScratchQ.parseState(enc)) === JSON.stringify(st), "state encoding");
+
+    /* ---------- the checker: "sum 1..n" ---------- */
+    const sumProg = times => prog({ vars: { n: 0, sum: 0, i: 0 } }, [GF,
+        ["sensing_askandwait", { QUESTION: "n?" }],
+        ["data_setvariableto", { VALUE: ["sensing_answer"] }, { VARIABLE: "n" }],
+        ["data_setvariableto", { VALUE: 0 }, { VARIABLE: "sum" }],
+        ["data_setvariableto", { VALUE: 1 }, { VARIABLE: "i" }],
+        ["control_repeat", { TIMES: times, SUBSTACK: [
+            ["data_changevariableby", { VALUE: { v: "i" } }, { VARIABLE: "sum" }],
+            ["data_changevariableby", { VALUE: 1 }, { VARIABLE: "i" }]] }],
+        ["looks_say", { MESSAGE: { v: "sum" } }]]);
+    const reference = sumProg({ v: "n" });
+    const offByOne = sumProg(["operator_subtract", { NUM1: { v: "n" }, NUM2: 1 }]);
+    const q = {
+        reference,
+        tests: [{ name: "3", answers: [3] }, { name: "10", answers: [10] }, { name: "h", answers: [100], hidden: true }],
+        observe: { say: true, vars: ["sum"] },
+        mistakes: [{ program: offByOne, message: { en: "The loop runs one time too few.", he: "הלולאה רצה פעם אחת פחות מדי." }, score: 30 }]
+    };
+    const checker = ScratchQ.Checker.create(q);
+    const g1 = await checker.grade(reference, "en");
+    ok(g1.grade === 100 && g1.tests.every(t => t.pass), "checker: the reference gets 100", g1);
+    const g2 = await checker.grade(offByOne, "he");
+    ok(g2.grade === 30 && g2.mistake === 0 && g2.feedback.indexOf("הלולאה רצה") === 0, "checker: a teacher mistake (message + score)", g2);
+    const hard = prog({ vars: { sum: 0 } }, [GF, ["sensing_askandwait", { QUESTION: "n?" }], ["data_setvariableto", { VALUE: 6 }, { VARIABLE: "sum" }], ["looks_say", { MESSAGE: 6 }]]);
+    const g3 = await checker.grade(hard, "en");
+    ok(Math.abs(g3.grade - 33.33) < 0.01 && /Passed 1 of 3/.test(g3.feedback) && /hidden test failed/.test(g3.feedback) && /Expected the sprite to say:\n\s+55\n/.test(g3.feedback),
+        "checker: hard-coded answer passes 1 of 3", g3.feedback);
+    const g4 = await checker.grade(prog({}, [["looks_say", { MESSAGE: 1 }]]), "en");
+    ok(g4.grade === 0 && /green flag/.test(g4.feedback), "checker: no green-flag script", g4);
+    const loopForever = prog({ vars: { sum: 0 } }, [GF, ["sensing_askandwait", { QUESTION: "n?" }], ["control_forever", { SUBSTACK: [["data_changevariableby", { VALUE: 1 }, { VARIABLE: "sum" }]] }]]);
+    const t0b = performance.now();
+    const g5 = await checker.grade(loopForever, "en");
+    ok(g5.grade === 0 && /did not stop/.test(g5.feedback), "checker: endless loop (" + Math.round(performance.now() - t0b) + " ms)", g5.feedback);
+    ok(ScratchQ.sameProgram(reference, JSON.parse(JSON.stringify(reference))) && !ScratchQ.sameProgram(reference, offByOne), "sameProgram");
+
+    /* the say log with repeats counted - nobody has to count "Hello!" five times */
+    ok(ScratchQ.sayText(["Hello!", "Hello!", "Hello!", "Hello!"]) === "[4] Hello!" &&
+        ScratchQ.sayText(["a", "5", "5", "b", "b", "a"], "", " | ") === "a | [2] 5 | [2] b | a" &&
+        ScratchQ.sayText([], "(nothing)") === "(nothing)", "say log: repeats counted as [n]", ScratchQ.sayText(["a", "5", "5", "b", "b", "a"], "", " | "));
+    ok(ScratchQ.expandSayLines(["[3] Hi", "Bye", "[2]x"]).join(",") === "Hi,Hi,Hi,Bye,x,x", "[n] text expands to n lines", ScratchQ.expandSayLines(["[3] Hi", "Bye", "[2]x"]));
+    const hello = n => prog({}, [GF, ["control_repeat", { TIMES: n, SUBSTACK: [["looks_say", { MESSAGE: "Hello!" }]] }], ["looks_say", { MESSAGE: "Bye" }]]);
+    const gh = await ScratchQ.Checker.create({ reference: hello(4) }).grade(hello(5), "en");
+    ok(/Expected the sprite to say:\n\s+\[4\] Hello!\n\s+Bye\n/.test(gh.feedback) && /Your program said:\n\s+\[5\] Hello!\n\s+Bye/.test(gh.feedback), "feedback: [4] vs [5], one line each", gh.feedback);
+    const tHello = await ScratchQ.Checker.gradeTrace({ reference: hello(4), trace: { items: [{ kind: "say" }] } }, { say: ["[4] Hello!", "Bye"] }, "en");
+    ok(tHello.grade === 100, "trace: the answer [4] Hello! counts as four lines", tHello);
+
+    /* ---------- a trace question ---------- */
+    const tq = { reference: sumProg(4), tests: [{ answers: [0] }], trace: { items: [{ kind: "say" }, { kind: "var", name: "i" }] } };
+    const tr1 = await ScratchQ.Checker.gradeTrace(tq, { say: ["10"], vars: { i: "5.0" } }, "en");
+    ok(tr1.grade === 100 && tr1.marks.join() === "true,true", "trace: correct answers (5.0 = 5)", tr1);
+    const tr2 = await ScratchQ.Checker.gradeTrace(tq, { say: ["10"], vars: { i: "4" } }, "en");
+    ok(tr2.grade === 50 && /1 of 2/.test(tr2.feedback), "trace: one of two", tr2);
+
+    document.getElementById("out").textContent = out.lines.join("\n");
+    window.__result = out;
+    window.__done = true;
+}
+main();
+</script>
+</body>
+</html>
