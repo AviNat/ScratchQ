@@ -62,6 +62,14 @@ try {
     const nTests = B.state.tests.length;
     $("addTest").click();
     await sleep(200);
+    /* the new test copies the last one's answers: the same inputs - a warning on its card and on the tab */
+    B.state.tests[nTests].answers = B.state.tests[nTests - 1].answers.slice();
+    await B.runChecks();
+    ok(/same inputs as test/.test($("testNote" + nTests).textContent) && $("tabBtnChecker").classList.contains("has-issue"), "a test with the same inputs as another is a warning", $("testNote" + nTests).textContent);
+    /* other inputs, the same outputs: a note only */
+    B.state.tests[nTests].answers = ["3.0"];
+    await B.runChecks();
+    ok(/same outputs as in test/.test($("testNote" + nTests).textContent) && !$("tabBtnChecker").classList.contains("has-issue"), "other inputs with the same outputs: a note, not an issue", $("testNote" + nTests).textContent);
     $("testsBox").querySelectorAll("button[data-del]")[nTests].click();
     await sleep(200);
     ok(B.state.tests.length === nTests && $("testsBox").querySelectorAll(".card").length === nTests, "🗑 Delete test removes the test", B.state.tests.length);
@@ -126,14 +134,14 @@ try {
     ok(stSaved === null && stScore === 0, "student: the starting program again is no answer");
     qApi.editor.dispose();
 
-    const rHost = document.createElement("div");
-    rHost.lang = "he";
-    document.body.appendChild(rHost);
-    await ScratchQ.Question.mount(rHost, B.questionConfig(), { state: ScratchQ.encodeState({ v: 1, program: B.state.mistakes[0].program, grade: 20, feedback: "" }), readOnly: true });
+    const revHost = document.createElement("div");
+    revHost.lang = "he";
+    document.body.appendChild(revHost);
+    await ScratchQ.Question.mount(revHost, B.questionConfig(), { state: ScratchQ.encodeState({ v: 1, program: B.state.mistakes[0].program, grade: 20, feedback: "" }), readOnly: true });
     await sleep(500);
-    ok(rHost.textContent.indexOf("בכל סיבוב") >= 0 && rHost.textContent.indexOf("התוכנית הנכונה") >= 0 && rHost.querySelectorAll(".blocklySvg").length >= 2,
-        "review: the mistake's message, the reference program (Hebrew)", rHost.textContent.slice(0, 200));
-    rHost.remove();
+    ok(revHost.textContent.indexOf("בכל סיבוב") >= 0 && revHost.textContent.indexOf("התוכנית הנכונה") >= 0 && revHost.querySelectorAll(".blocklySvg").length >= 2,
+        "review: the mistake's message, the reference program (Hebrew)", revHost.textContent.slice(0, 200));
+    revHost.remove();
 
     /* the code opens again as an exercise (after emptying the mistakes and tests here) */
     const before = B.state.reference;
@@ -164,9 +172,33 @@ try {
     await B.runChecks();
     await sleep(300);
     ok(B.state.observe.pen === true && $("observeBox").querySelector("input[data-obs=pen]:checked"), "pen: the drawing is checked (ticked by itself)");
-    ok(/draws 4 lines:\n\s+.*\(0, -100\) – \(0, 0\)/.test($("testExp0").textContent), "pen: the test shows the reference's lines", $("testExp0").textContent);
+    ok(/draws 4 lines/.test($("testExp0").textContent) && !/\(0, /.test($("testExp0").textContent) && $("testExp0").querySelector("svg"),
+        "pen: the test shows the count and a picture, no coordinates", $("testExp0").textContent);
+    ok(/font-style="italic">x</.test($("testExp0").innerHTML), "pen: the test's picture has the x and y axes");
+    ok($("addTest").disabled, "no inputs (no ask, variables, lists, random): + Add a test is disabled");
     const pg = await ScratchQ.Checker.create(B.questionConfig()).grade(square(3), "en");
-    ok(pg.grade === 0 && /Lines missing:/.test(pg.feedback), "pen: three sides of the square get 0 and the missing side", pg.feedback);
+    ok(pg.grade === 0 && /3 of the 4 expected lines/.test(pg.feedback), "pen: three sides of the square get 0, counted", pg.feedback);
+    /* the reference's drawing: shown, grid / axes, copy-ready SVG */
+    ok(!$("drawingSection").hidden && await until(() => $("drawPic").querySelector("svg path[stroke='#2f5fd0']"), 3000), "drawing section: the reference's picture");
+    ok(/<text/.test($("drawPic").innerHTML), "drawing section: the axes by default");
+    $("drawAxes").click();
+    ok(await until(() => $("drawPic").querySelector("svg") && !/<text/.test($("drawPic").innerHTML), 3000) && B.state.drawing.axes === false, "drawing section: the axes off");
+    $("drawAxes").click();
+    const dcfg = B.questionConfig();
+    ok(dcfg.drawing && dcfg.drawing.review === true && dcfg.drawing.answering === false && dcfg.drawing.axes === true, "the code carries the drawing options", dcfg.drawing);
+    /* the student's drawing: while answering (on) and in the review */
+    $("drawAnswering").click();
+    const stuHost = document.createElement("div");
+    document.body.appendChild(stuHost);
+    await ScratchQ.Question.mount(stuHost, B.questionConfig(), { onChange: () => {} });
+    ok(await until(() => /Your drawing|הציור שלך/.test(stuHost.textContent) && stuHost.querySelector("svg path[stroke='#2f5fd0']") === null, 5000),
+        "student: the drawing while answering (the starting program draws nothing)", stuHost.textContent.slice(0, 200));
+    const penRevHost = document.createElement("div");
+    document.body.appendChild(penRevHost);
+    await ScratchQ.Question.mount(penRevHost, B.questionConfig(), { readOnly: true, state: { v: 1, program: square(3), grade: 0, feedback: "" } });
+    ok(await until(() => penRevHost.querySelectorAll("figure svg").length === 2, 5000), "review: the student's drawing and the correct one", penRevHost.querySelectorAll("figure").length);
+    stuHost.remove(); penRevHost.remove();
+    $("drawAnswering").click();
     B.loadState(ex, "sum-1-to-n.scratchq", null);
     await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).length > 5);
 

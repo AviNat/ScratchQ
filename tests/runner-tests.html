@@ -191,8 +191,23 @@ async function main() {
     ok(gp1.grade === 100, "checker: the anticlockwise square passes", gp1.feedback);
     const three = prog({}, [GF, PD, ["control_repeat", { TIMES: 3, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
     const gp2 = await pc.grade(three, "en");
-    ok(gp2.grade === 0 && /4 lines were expected; your program drew 3/.test(gp2.feedback) && /Lines missing:\n\s+⁦\(0, -100\) – \(0, 0\)⁩/.test(gp2.feedback),
-        "checker: a missing side is named", gp2.feedback);
+    ok(gp2.grade === 0 && /4 lines were expected; your program drew 3/.test(gp2.feedback) && /3 of the 4 expected lines are drawn as expected/.test(gp2.feedback) && !/\(0, /.test(gp2.feedback),
+        "checker: a missing side - counted, no coordinates", gp2.feedback);
+    /* the same square turned: every line is elsewhere - counted as such, no analysis of the turn */
+    const turned = prog({}, [GF, ["motion_turnright", { DEGREES: 45 }], PD, ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
+    const gp3 = await pc.grade(turned, "en");
+    ok(gp3.grade === 0 && /not the expected one/.test(gp3.feedback) && /0 of the 4 expected lines/.test(gp3.feedback), "checker: a turned square - the same count, 0 right", gp3.feedback);
+    /* the picture */
+    const svg = ScratchQ.Drawing.svg(ScratchQ.Drawing.merge(rs.pen), { width: 300 });
+    ok(/^<svg [^>]*width="300"/.test(svg) && /stroke="#2f5fd0"/.test(svg) && />100</.test(svg) && /font-style="italic">x</.test(svg), "drawing: the SVG with the lines, the axes' numbers", svg.slice(0, 200));
+    const bare = ScratchQ.Drawing.svg(ScratchQ.Drawing.merge(rs.pen), { grid: false, axes: false });
+    ok(!/<text/.test(bare) && !/#dde3ea/.test(bare) && /#2f5fd0/.test(bare), "drawing: without the grid and the axes");
+    const vb = s => /viewBox="([^"]+)"/.exec(s)[1];
+    const sqSegs = ScratchQ.Drawing.merge(rs.pen), turnedSegs = ScratchQ.Drawing.merge(gp3.tests[0].got.pen || []);
+    ok(vb(ScratchQ.Drawing.svg(sqSegs, { fit: turnedSegs })) === vb(ScratchQ.Drawing.svg(turnedSegs, { fit: sqSegs })) &&
+        vb(ScratchQ.Drawing.svg(sqSegs, {})) !== vb(ScratchQ.Drawing.svg(turnedSegs, {})), "drawing: fit - two pictures on one view");
+    const empty = ScratchQ.Drawing.svg([], {});
+    ok(/<svg/.test(empty) && !/#2f5fd0/.test(empty), "drawing: no lines - the grid only");
     const near = prog({}, [GF, PD, ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 100.3 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
     const far = prog({}, [GF, PD, ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 101 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
     ok((await pc.grade(near, "en")).grade === 100 && (await pc.grade(far, "en")).grade === 0, "checker: ends within 0.5 are the same, 1 is not");

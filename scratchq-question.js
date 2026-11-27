@@ -24,6 +24,9 @@
  *     inputs: { score: "ans1", state: "ans2" },           - STACK-JS only
  *     reference, initial, locks, palette,                 - programs (scratchq.js), locks (scratchq-editor.js)
  *     tests, observe, mistakes, trace: { items },         - the checking (scratchq.js, Checker)
+ *     drawing: { answering, review, grid, axes },         - observe.pen only: the student's drawing shown while
+ *                                                           answering / in the review (with the correct one when the
+ *                                                           review shows the reference); grid and axes in the picture
  *     height }                                            - the block area's height in px
  *
  * The saved state: { v: 1, program | answers, grade (0..100), feedback }; in STACK "sq1:" + base64 of its JSON.
@@ -34,7 +37,7 @@
 const ScratchQ = global.ScratchQ;
 if (!ScratchQ || !ScratchQ.Editor) throw new Error("scratchq-question.js needs scratchq.js and scratchq-editor.js");
 
-const VERSION = "0.1.2";
+const VERSION = "0.2.0";
 const UI = {
     en: { answerHere: "Your answer:", sayHint: "One line for each thing the sprite says, in order. The same thing several times in a row: [10] Hello", listHint: "One item per line.",
           yourProgram: "Your program:", loading: "Loading…" },
@@ -71,6 +74,30 @@ function studentLanguage(cfg) {
     return cfg.language === "system"
         ? (s(global.studentLanguage) || s(document.documentElement.lang) || "en")
         : (s(cfg.language) || "en");
+}
+
+/*
+ * The drawing (observe.pen): the picture of a program's run on the first test the student may see. The checking
+ * compares the lines; the picture lets the student (and the teacher grading by hand) see what was drawn.
+ */
+function drawingShown(cfg, where) {
+    return cfg.kind !== "trace" && !!(cfg.observe && cfg.observe.pen) && !!(cfg.drawing && cfg.drawing[where] === true);
+}
+function drawingTest(cfg) {
+    const tests = cfg.tests && cfg.tests.length ? cfg.tests : [{ name: "1" }];
+    return tests.find(function (t) { return !t.hidden; }) || tests[0];
+}
+function drawingOf(program, cfg) {
+    return ScratchQ.Runner.run(program, drawingTest(cfg), { maxMs: 400 }).then(function (r) { return ScratchQ.Drawing.merge(r.pen); });
+}
+function drawingFigure(title, segments, cfg, fit) {
+    const d = cfg.drawing || {};
+    const fig = el("figure", "margin:0;display:inline-flex;flex-direction:column;gap:4px");
+    fig.appendChild(el("figcaption", "font-weight:bold", title));
+    const pic = el("div", "border:1px solid #ccd3db;border-radius:6px;overflow:hidden;line-height:0;width:max-content");
+    pic.innerHTML = ScratchQ.Drawing.svg(segments, { grid: d.grid !== false, axes: d.axes !== false, width: 320, fit: fit });
+    fig.appendChild(pic);
+    return fig;
 }
 
 /* the feedback block of the review: the grade line, then the rest */
@@ -205,8 +232,26 @@ function runQuestion(host, cfg, adapter) {
         const program = saved && saved.program ? saved.program : initial;
         const edBox = el("div");
         host.appendChild(edBox);
+        /* the student's drawing while answering: drawn again after each change */
+        const liveDrawing = !review && drawingShown(cfg, "answering") ? el("div", "margin-top:10px") : null;
+        if (liveDrawing) host.appendChild(liveDrawing);
+        let drawTimer = null, drawSeq = 0;
+        function redraw(p) {
+            if (!liveDrawing) return;
+            clearTimeout(drawTimer);
+            drawTimer = setTimeout(function () {
+                const mine = drawSeq += 1;
+                drawingOf(p, cfg).then(function (segs) {
+                    if (mine !== drawSeq) return;
+                    liveDrawing.textContent = "";
+                    liveDrawing.appendChild(drawingFigure(ScratchQ.tr(lang, "yourDrawing"), segs, cfg));
+                });
+            }, 150);
+        }
+        redraw(program);
         let timer = null, seq = 0, pending = null;
         function changed(p) {
+            redraw(p);
             debug("the program changed (" + Object.keys(p.blocks || {}).length + " blocks)" + (review ? " - review, not saved" : !adapter.save ? " - nothing to save to" : ""));
             if (review || !adapter.save) return;
             clearTimeout(timer);
@@ -260,11 +305,23 @@ function runQuestion(host, cfg, adapter) {
                 /* graded again with the question's current tests - the saved grade is what Moodle has */
                 return api.grade().then(function (g) {
                     showFeedback(box, cfg, { feedback: g.feedback }, lang);
-                    return showReference(box).then(function () { return api; });
-                });
+                    return showDrawings(box);
+                }).then(function () { return showReference(box); }).then(function () { return api; });
             }
             return showReference(box).then(function () { return api; });
         });
+        /* the review: the student's drawing, and the correct one beside it when the review shows the reference */
+        function showDrawings(box) {
+            if (!drawingShown(cfg, "review")) return Promise.resolve();
+            const withRef = !(cfg.review && cfg.review.reference === false);
+            return Promise.all([drawingOf(saved.program, cfg), withRef ? drawingOf(cfg.reference, cfg) : null]).then(function (d) {
+                const row = el("div", "display:flex;flex-wrap:wrap;gap:16px;margin-top:12px;align-items:flex-start");
+                /* the same scale and place for both: the difference is what the eye compares */
+                row.appendChild(drawingFigure(ScratchQ.tr(lang, "yourDrawing"), d[0], cfg, d[1] || []));
+                if (withRef) row.appendChild(drawingFigure(ScratchQ.tr(lang, "refDrawing"), d[1], cfg, d[0]));
+                box.appendChild(row);
+            });
+        }
         function showReference(box) {
             if (cfg.review && cfg.review.reference === false) return Promise.resolve();
             box.appendChild(el("div", "font-weight:bold;margin-top:12px", ScratchQ.tr(lang, "reference")));

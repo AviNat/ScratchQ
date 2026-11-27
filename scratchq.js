@@ -33,7 +33,7 @@
 (function (global) {
 "use strict";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 /* ============================================================
    THE PROGRAM -> a Scratch 3 project (project.json)
@@ -344,8 +344,9 @@ const TEXT = {
         expectedVar: "Expected {v} = {e}; it is {g}.", expectedList: "Expected the list {v} = [{e}]; it is [{g}].",
         traceCorrect: "Correct.", traceWrong: "{p} of {n} answers are correct.", traceSay: "What the sprite says", traceVar: "The value of {v}", traceList: "The list {v}",
         reference: "The correct program:", correctAnswer: "The correct answer:", empty: "No answer was given.",
-        drawingCount: "The drawing: {e} lines were expected; your program drew {g}.", missingLines: "Lines missing:",
-        extraLines: "Lines that should not be there:", more: "... and {n} more"
+        drawingCount: "The drawing: {e} lines were expected; your program drew {g}.", drawingDiffers: "The drawing is not the expected one.",
+        drawingRight: "{m} of the {e} expected lines are drawn as expected.", more: "... and {n} more",
+        yourDrawing: "Your drawing:", refDrawing: "The correct drawing:"
     },
     he: {
         passed: "עברו {p} מתוך {n} בדיקות.", allPassed: "נכון - כל {n} הבדיקות עברו.", noScript: "אין בתוכנית תסריט שמתחיל בדגל הירוק.",
@@ -354,8 +355,9 @@ const TEXT = {
         expectedVar: "היה צריך להיות {v} = {e}; הערך הוא {g}.", expectedList: "הרשימה {v} הייתה צריכה להיות [{e}]; היא [{g}].",
         traceCorrect: "נכון.", traceWrong: "{p} מתוך {n} תשובות נכונות.", traceSay: "מה הדמות אומרת", traceVar: "הערך של {v}", traceList: "הרשימה {v}",
         reference: "התוכנית הנכונה:", correctAnswer: "התשובה הנכונה:", empty: "לא ניתנה תשובה.",
-        drawingCount: "הציור: היו צריכים להיות {e} קווים; התוכנית שלך ציירה {g}.", missingLines: "קווים חסרים:",
-        extraLines: "קווים מיותרים:", more: "... ועוד {n}"
+        drawingCount: "הציור: היו צריכים להיות {e} קווים; התוכנית שלך ציירה {g}.", drawingDiffers: "הציור אינו הציור הנדרש.",
+        drawingRight: "{m} מתוך {e} הקווים הנדרשים צוירו כנדרש.", more: "... ועוד {n}",
+        yourDrawing: "הציור שלך:", refDrawing: "הציור הנכון:"
     },
     ar: {
         passed: "نجح {p} من {n} اختبارات.", allPassed: "صحيح - نجحت جميع الاختبارات ({n}).", noScript: "لا يوجد في البرنامج نص برمجي يبدأ بالعلم الأخضر.",
@@ -364,8 +366,9 @@ const TEXT = {
         expectedVar: "كان يجب أن يكون {v} = {e}؛ القيمة {g}.", expectedList: "كان يجب أن تكون القائمة {v} = [{e}]؛ هي [{g}].",
         traceCorrect: "صحيح.", traceWrong: "{p} من {n} إجابات صحيحة.", traceSay: "ماذا يقول الكائن", traceVar: "قيمة {v}", traceList: "القائمة {v}",
         reference: "البرنامج الصحيح:", correctAnswer: "الإجابة الصحيحة:", empty: "لم تُعطَ إجابة.",
-        drawingCount: "الرسم: كان يجب رسم {e} خطوط؛ رسم برنامجك {g}.", missingLines: "خطوط ناقصة:",
-        extraLines: "خطوط زائدة:", more: "... و{n} أخرى"
+        drawingCount: "الرسم: كان يجب رسم {e} خطوط؛ رسم برنامجك {g}.", drawingDiffers: "الرسم ليس الرسم المطلوب.",
+        drawingRight: "رُسم {m} من {e} الخطوط المطلوبة كما يجب.", more: "... و{n} أخرى",
+        yourDrawing: "رسمك:", refDrawing: "الرسم الصحيح:"
     }
 };
 function supportedLanguage(code) {
@@ -458,6 +461,74 @@ function segmentText(s) {
     return "⁦(" + n(s[0]) + ", " + n(s[1]) + ") – (" + n(s[2]) + ", " + n(s[3]) + ")⁩";
 }
 
+/*
+ * A drawing as an SVG image (text: no DOM needed). Scratch's coordinates: x to the right, y up. The view fits the
+ * drawing and the starting point (0, 0), with a margin of one grid square, on whole grid squares.
+ *   opts: { grid: true, axes: true, width: 360 (px), color, title, fit: [segments] }
+ * fit: more lines the view must hold (not drawn) - two pictures side by side on the same scale and place.
+ * The same picture in the builder (the question's text, "Copy SVG") and for the student.
+ */
+function niceStep(span) {
+    const raw = Math.max(span / 10, 1);
+    const p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const m = raw / p;
+    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+}
+function drawingSvg(segments, opts) {
+    opts = opts || {};
+    const grid = opts.grid !== false, axes = opts.axes !== false;
+    const segs = segments || [];
+    let x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    segs.concat(opts.fit || []).forEach(function (s) {
+        x0 = Math.min(x0, s[0], s[2]); x1 = Math.max(x1, s[0], s[2]);
+        y0 = Math.min(y0, s[1], s[3]); y1 = Math.max(y1, s[1], s[3]);
+    });
+    if (x1 - x0 < 1e-6 && y1 - y0 < 1e-6) { x0 = -100; x1 = 100; y0 = -100; y1 = 100; }
+    const step = niceStep(Math.max(x1 - x0, y1 - y0));
+    x0 = (Math.floor(x0 / step) - 1) * step; x1 = (Math.ceil(x1 / step) + 1) * step;
+    y0 = (Math.floor(y0 / step) - 1) * step; y1 = (Math.ceil(y1 / step) + 1) * step;
+    const w = x1 - x0, h = y1 - y0;
+    const width = opts.width || 360, height = Math.round(width * h / w);
+    const u = w / width;                                   // one pixel in drawing units
+    function n(v) { const r = Math.round(v * 100) / 100; return String(r === 0 ? 0 : r); }
+    const out = [];
+    out.push("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + width + "\" height=\"" + height + "\" viewBox=\"" +
+        n(x0) + " " + n(-y1) + " " + n(w) + " " + n(h) + "\" style=\"background:#fff;direction:ltr\">");
+    if (opts.title) out.push("<title>" + String(opts.title).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</title>");
+    if (grid) {
+        const g = [];
+        for (let x = x0; x <= x1 + 1e-9; x += step) g.push("M" + n(x) + " " + n(-y1) + "V" + n(-y0));
+        for (let y = y0; y <= y1 + 1e-9; y += step) g.push("M" + n(x0) + " " + n(-y) + "H" + n(x1));
+        out.push("<path d=\"" + g.join("") + "\" stroke=\"#dde3ea\" stroke-width=\"" + n(u) + "\" fill=\"none\"/>");
+    }
+    if (axes) {
+        /* a number every 1, 2, 5 or 10 grid squares: at least ~30 px apart, so a small picture's numbers do not overlap */
+        const fs = 11 * u, perStep = step / u;
+        const every = [1, 2, 5, 10, 20, 50].find(function (k) { return k * perStep >= 30; }) || 100;
+        out.push("<path d=\"M" + n(x0) + " 0H" + n(x1) + "M0 " + n(-y1) + "V" + n(-y0) + "\" stroke=\"#8a96a3\" stroke-width=\"" + n(1.2 * u) + "\" fill=\"none\"/>");
+        const t = [];
+        /* the numbers on round values (multiples of every * step), never at 0 or on the picture's edge */
+        const skip = function (v) { return Math.abs(v) < 1e-9 || Math.round(v / step) % every !== 0; };
+        for (let x = x0 + step; x < x1 - 1e-9; x += step) {
+            if (skip(x)) continue;
+            t.push("<text x=\"" + n(x) + "\" y=\"" + n(fs * 1.15) + "\" text-anchor=\"middle\">" + n(x) + "</text>");
+        }
+        for (let y = y0 + step; y < y1 - 1e-9; y += step) {
+            if (skip(y)) continue;
+            t.push("<text x=\"" + n(-3 * u) + "\" y=\"" + n(-y + fs * 0.35) + "\" text-anchor=\"end\">" + n(y) + "</text>");
+        }
+        t.push("<text x=\"" + n(x1 - 3 * u) + "\" y=\"" + n(-3 * u) + "\" text-anchor=\"end\" font-style=\"italic\">x</text>");
+        t.push("<text x=\"" + n(4 * u) + "\" y=\"" + n(-y1 + fs) + "\" font-style=\"italic\">y</text>");
+        out.push("<g font-family=\"Arial,sans-serif\" font-size=\"" + n(fs) + "\" fill=\"#5b6876\">" + t.join("") + "</g>");
+    }
+    if (segs.length) {
+        out.push("<path d=\"" + segs.map(function (s) { return "M" + n(s[0]) + " " + n(-s[1]) + "L" + n(s[2]) + " " + n(-s[3]); }).join("") +
+            "\" stroke=\"" + (opts.color || "#2f5fd0") + "\" stroke-width=\"" + n(2.5 * u) + "\" stroke-linecap=\"round\" fill=\"none\"/>");
+    }
+    out.push("</svg>");
+    return out.join("");
+}
+
 /* what a test observes of a run: the say log (say / think, not the questions), chosen variables and lists, the drawing */
 function observed(run, observe) {
     observe = observe || { say: true };
@@ -537,14 +608,11 @@ function failLines(lang, exp, got, observe) {
     }
     if (exp.pen || got.pen) {
         const d = compareDrawings(exp.pen, got.pen);
+        /* counts only: a list of coordinates does not help (and a moved or turned drawing would list every line) */
         if (d.missing.length || d.extra.length) {
-            lines.push(tr(lang, "drawingCount", { e: (exp.pen || []).length, g: (got.pen || []).length }));
-            [["missingLines", d.missing], ["extraLines", d.extra]].forEach(function (part) {
-                if (!part[1].length) return;
-                lines.push(tr(lang, part[0]));
-                part[1].slice(0, 6).forEach(function (s) { lines.push("    " + segmentText(s)); });
-                if (part[1].length > 6) lines.push("    " + tr(lang, "more", { n: part[1].length - 6 }));
-            });
+            const e = (exp.pen || []).length, g = (got.pen || []).length;
+            lines.push(tr(lang, e === g ? "drawingDiffers" : "drawingCount", { e: e, g: g }));
+            lines.push(tr(lang, "drawingRight", { m: e - d.missing.length, e: e }));
         }
     }
     Object.keys(exp.vars).forEach(function (n) {
@@ -711,7 +779,7 @@ const ScratchQ = {
     sayText: sayText,
     sayLines: sayLines,
     expandSayLines: expandSayLines,
-    Drawing: { merge: mergeSegments, compare: compareDrawings, same: sameDrawing, segmentText: segmentText, SAME_POINT: SAME_POINT },
+    Drawing: { merge: mergeSegments, compare: compareDrawings, same: sameDrawing, segmentText: segmentText, svg: drawingSvg, SAME_POINT: SAME_POINT },
     Checker: { create: createChecker, runTests: runTests, observed: observed, sameObserved: sameObserved, traceExpected: traceExpected, gradeTrace: gradeTrace },
     TEXT: TEXT,
     supportedLanguage: supportedLanguage,

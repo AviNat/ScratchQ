@@ -395,7 +395,14 @@ How to run the tests: `node tests/run-page.mjs tests/runner-tests.html`. `SHOT=f
 - **Parsons** (K2) and **structural rules** (§6.2).
 - **The builder's interface language:** English only, like the math playground.
 - **Hosting:** done - the library is on GitHub Pages, `https://avinat.github.io/ScratchQ/` (repository AviNat/ScratchQ).
-- **Pen:** a trace question about a drawing, and showing the drawing (a small canvas) - not wanted for now.
+- **Pen:** a trace question about a drawing - not wanted for now.
+
+### 12.4 The drawing shown (user, 2026-11-27; lib 0.3.0, question 0.2.0)
+- **Pictures, not coordinates.** Lists of segments were too detailed: a drawing moved, turned or reflected lists every line as wrong. The builder and the feedback no longer list coordinates. The feedback gives only counts: "{e} lines were expected; your program drew {g}" (or "the drawing is not the expected one"), then "{m} of the {e} expected lines are drawn as expected".
+- **No transformation analysis**, and no acceptance of a moved or turned drawing. There are too many cases: the teacher grades those by hand from the pictures.
+- `ScratchQ.Drawing.svg(segments, { grid, axes, width, fit })` draws an SVG as text. The view fits the drawing and (0, 0), on whole grid squares. `fit` puts two pictures side by side on the same scale.
+- **The builder (tab 2):** "The reference's drawing" for a chosen test, with Grid and X/Y axes options, **Copy SVG** and **Download .svg** for the question's text. The tests and the attempt show small pictures.
+- **The question:** `drawing: { answering, review, grid, axes }`, only when the drawing is checked. *While answering*: the student's drawing under the editor, drawn again after each change (off by default, the earlier decision 9). *In the review*: the student's drawing and, when the review shows the reference, the correct one beside it on the same scale (on by default, for grading by hand). The picture is of the first test that is not hidden.
 
 ## 13. Open questions for the user
 1. ~~Hebrew UI~~ → decided (§0.4). ~~Grades~~ → 7–9. ~~Container~~ → STACK.

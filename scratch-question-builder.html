@@ -94,6 +94,8 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
 .help code{background:#eef1f5;border-radius:4px;padding:0 4px}
 #tryHost{max-width:1000px}
 .split{display:grid;grid-template-columns:1fr;gap:12px}
+.drawing-pic{display:inline-block;border:1px solid var(--line);border-radius:6px;overflow:hidden;line-height:0}
+.mini-drawing{display:inline-block;margin-top:6px;border:1px solid var(--line);border-radius:4px;overflow:hidden;line-height:0}
 </style>
 </head>
 <body>
@@ -164,6 +166,26 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <div id="observeBox"></div>
   <label class="check"><input type="checkbox" id="caseSensitive"> <span>Upper and lower case must match when the student's outputs are compared with the reference's (what the sprite says, the values).
     This does not change the program: Scratch's "=" inside the program always ignores case ("monkey" = "Monkey" is true).</span></label>
+</section>
+
+<section id="drawingSection" hidden>
+  <h2>The reference's drawing
+    <button type="button" class="small" id="drawCopy" title="Copy the picture as SVG, for the question's text">Copy SVG</button>
+    <button type="button" class="small" id="drawDownload">Download .svg</button>
+    <span id="drawMsg" class="hint"></span></h2>
+  <p class="hint">What the reference draws with the pen. Put it in the question's text as part of the instructions: in the editor's HTML (source) view paste the copied SVG, or upload the downloaded .svg as an image (if the editor removes pasted SVG, the image always works).</p>
+  <div class="row">
+    <label class="field" id="drawTestField">Test<select id="drawTest"></select></label>
+    <label class="check"><input type="checkbox" id="drawGrid"> <span>Grid</span></label>
+    <label class="check"><input type="checkbox" id="drawAxes"> <span>X and Y axes</span></label>
+  </div>
+  <div class="drawing-pic" id="drawPic"></div>
+  <div class="row">
+    <span>Show the student's drawing:</span>
+    <label class="check"><input type="checkbox" id="drawAnswering"> <span>while answering</span></label>
+    <label class="check"><input type="checkbox" id="drawReview"> <span>in the review (with the correct drawing when the review shows the correct program) - for grading by hand</span></label>
+  </div>
+  <p class="hint">The grid and the axes are the same in the student's pictures. The student's picture is of the first test that is not hidden.</p>
 </section>
 
 <section id="traceSection" hidden>
@@ -302,7 +324,7 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
 "use strict";
 const $ = id => document.getElementById(id);
 const BUILDER_VERSION = "0.1.0";
-const CODE_VERSION = "2026-11-26.1";
+const CODE_VERSION = "2026-11-27.1";
 const TOOL = "scratchq-builder";
 const QUESTION_TOOL = "scratchq-question";
 const FILE_EXT = ".scratchq";
@@ -326,6 +348,7 @@ function defaultState() {
         tests: [{ name: "1", vars: {}, lists: {}, answers: [], seed: 1, hidden: false }],
         observe: { say: true, vars: [], lists: [], caseSensitive: false },
         trace: { items: [{ kind: "say" }] },
+        drawing: { answering: false, review: true, grid: true, axes: true },
         mistakes: [],
         question: { target: "stack", questionId: "scratch1", inputs: { score: "ans1", state: "ans2" },
             review: { grade: true, feedback: true, reference: true }, libraryUrl: DEFAULT_LIBRARY }
@@ -357,7 +380,7 @@ function checkConfig() {
     return {
         kind: state.kind, language: state.language, height: state.height,
         reference: state.reference, initial: state.initial, locks: state.locks, palette: state.palette,
-        tests: state.tests.map(t => testForRun(t)), observe: state.observe, trace: state.trace,
+        tests: state.tests.map(t => testForRun(t)), observe: state.observe, trace: state.trace, drawing: state.drawing,
         mistakes: state.mistakes.map(m => ({ program: m.program, message: m.message, score: m.score }))
     };
 }
@@ -604,9 +627,20 @@ function renderTests() {
             "<button type=\"button\" class=\"small\" data-del=\"" + i + "\"" + (state.tests.length > 1 ? " title=\"Delete this test\"" : " disabled title=\"A question needs at least one test\"") +
             ">🗑 Delete test</button></div>" +
             "<div class=\"test-grid\"><div>" + testInputsHtml(t, i) + "</div>" +
-            "<div><div class=\"hint\" style=\"margin:0 0 3px\">The reference gives:</div><div class=\"expected\" id=\"testExp" + i + "\">…</div></div></div>";
+            "<div><div class=\"hint\" style=\"margin:0 0 3px\">The reference gives:</div><div class=\"expected\" id=\"testExp" + i + "\">…</div></div></div>" +
+            "<div class=\"status\" id=\"testNote" + i + "\"></div>";
         box.appendChild(card);
     });
+    /* a test can only change the program's inputs: without any, every test is the same run */
+    const inputs = hasInputs(state.reference);
+    $("addTest").disabled = !inputs;
+    $("addTest").title = inputs ? "" : "The program has no \"ask\", variables, lists or \"pick random\": every test would run it the same way.";
+}
+function hasInputs(p) { return usesAsk(p) || usesRandom(p) || varNames(p).length > 0 || listNames(p).length > 0; }
+/* what a test gives the program (not its name or "hidden"): equal keys = the same run */
+function testInputKey(t) {
+    const r = testForRun(t), sorted = o => Object.keys(o).sort().map(k => [k, o[k]]);
+    return JSON.stringify([usesAsk(state.reference) ? r.answers : [], sorted(r.vars), sorted(r.lists), usesRandom(state.reference) ? r.seed : 0]);
 }
 function readTestField(e) {
     const el = e.target, i = Number(el.dataset.i);
@@ -652,16 +686,77 @@ function outputText(o) {
     if (o.status === "noAnswer") lines.push("⚠ It asked more questions than the answers given.");
     if (o.status === "error") lines.push("⚠ Error: " + o.message);
     if (o.say) lines.push(o.say.length ? "says:\n  " + ScratchQ.sayText(o.say, "", "\n  ") : "says: (nothing)");
-    if (o.pen) {
-        lines.push("draws " + o.pen.length + (o.pen.length === 1 ? " line" : " lines") + (o.pen.length ? ":" : ""));
-        o.pen.slice(0, 12).forEach(s => lines.push("  " + ScratchQ.Drawing.segmentText(s)));
-        if (o.pen.length > 12) lines.push("  … and " + (o.pen.length - 12) + " more");
-    }
+    if (o.pen) lines.push("draws " + o.pen.length + (o.pen.length === 1 ? " line" : " lines"));
     Object.keys(o.vars || {}).forEach(n => lines.push(n + " = " + o.vars[n]));
     Object.keys(o.lists || {}).forEach(n => lines.push("list " + n + " = [" + (o.lists[n] || []).join(", ") + "]"));
     if (!lines.length) lines.push("(nothing is checked - choose what is checked above)");
     return lines.join("\n");
 }
+
+/* the outputs as HTML: the text, and the drawing as a small picture (not its lines' coordinates) */
+function outputHtml(o, other) {
+    let html = esc(outputText(o));
+    /* other: the outputs shown beside these (expected / got) - both pictures on the same scale */
+    if (o.pen) html += "\n<span class=\"mini-drawing\">" + ScratchQ.Drawing.svg(o.pen, { grid: state.drawing.grid !== false, axes: state.drawing.axes !== false, width: 220, fit: other && other.pen }) + "</span>";
+    return html;
+}
+
+/* the reference's drawing: a picture for the question's text, the student's drawing options */
+let drawingSvgText = "", drawSeq = 0;
+function renderDrawingSection() {
+    const show = state.kind !== "trace" && usesPen(state.reference);
+    $("drawingSection").hidden = !show;
+    if (!show) { drawingSvgText = ""; return; }
+    const sel = $("drawTest");
+    const keep = Math.min(Number(sel.value) || 0, state.tests.length - 1);
+    sel.innerHTML = state.tests.map((t, i) => "<option value=\"" + i + "\">" + esc(t.name || String(i + 1)) + (t.hidden ? " (hidden)" : "") + "</option>").join("");
+    sel.value = String(keep);
+    $("drawTestField").hidden = state.tests.length < 2;
+    const d = state.drawing;
+    $("drawGrid").checked = d.grid !== false;
+    $("drawAxes").checked = d.axes !== false;
+    $("drawAnswering").checked = !!d.answering;
+    $("drawReview").checked = !!d.review;
+    const pen = !!state.observe.pen;
+    $("drawAnswering").disabled = $("drawReview").disabled = !pen;
+    $("drawAnswering").parentElement.title = $("drawReview").parentElement.title = pen ? "" : "Only when the drawing is checked (above)";
+    const mine = ++drawSeq;
+    ScratchQ.Runner.run(state.reference, testForRun(state.tests[keep]), { maxMs: 400 }).then(r => {
+        if (mine !== drawSeq) return;
+        const segs = ScratchQ.Drawing.merge(r.pen);
+        drawingSvgText = ScratchQ.Drawing.svg(segs, { grid: d.grid !== false, axes: d.axes !== false, width: 420 });
+        $("drawPic").innerHTML = drawingSvgText;
+        $("drawMsg").textContent = segs.length + (segs.length === 1 ? " line" : " lines") + (r.status !== "done" ? " - ⚠ the run did not finish (" + r.status + ")" : "");
+    });
+}
+$("drawTest").onchange = renderDrawingSection;
+[["drawGrid", "grid"], ["drawAxes", "axes"], ["drawAnswering", "answering"], ["drawReview", "review"]].forEach(([id, k]) => {
+    $(id).addEventListener("change", () => {
+        state.drawing[k] = $(id).checked;
+        renderDrawingSection();
+        changed();
+    });
+});
+$("drawCopy").onclick = async () => {
+    if (!drawingSvgText) return;
+    try {
+        if (window.ClipboardItem && navigator.clipboard.write) {
+            await navigator.clipboard.write([new ClipboardItem({
+                "text/plain": new Blob([drawingSvgText], { type: "text/plain" }),
+                "text/html": new Blob([drawingSvgText], { type: "text/html" }) })]);
+        } else await navigator.clipboard.writeText(drawingSvgText);
+        $("drawMsg").textContent = "Copied.";
+    } catch (e) { $("drawMsg").textContent = "Could not copy: " + e.message; }
+};
+$("drawDownload").onclick = () => {
+    if (!drawingSvgText) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + drawingSvgText], { type: "image/svg+xml" }));
+    a.download = (state.question.questionId || "drawing") + ".svg";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+};
 
 /* trace: the items, the one run's data, the correct answer */
 function renderTraceSection() {
@@ -736,7 +831,7 @@ function showAttemptResult(g, note) {
         html += "<table class=\"result-table\"><tr><th>Test</th><th></th><th>Expected (the reference)</th><th>The attempt gives</th></tr>";
         g.tests.forEach(t => {
             html += "<tr><td>" + esc(t.name) + (t.hidden ? " (hidden)" : "") + "</td><td class=\"" + (t.pass ? "pass\">✓" : "fail\">✗") + "</td>" +
-                "<td class=\"mono\">" + esc(outputText(t.expected)) + "</td><td class=\"mono\">" + esc(outputText(t.got)) + "</td></tr>";
+                "<td class=\"mono\">" + outputHtml(t.expected, t.got) + "</td><td class=\"mono\">" + outputHtml(t.got, t.expected) + "</td></tr>";
         });
         html += "</table>";
     }
@@ -836,6 +931,7 @@ async function runChecks() {
     $("refStatus").className = "status";
     $("refStatus").textContent = "";
     if (!has) found.checker.push(["bad", "The reference program has no script that starts with the green flag (with blocks under it)."]);
+    renderDrawingSection();
 
     if (state.kind === "trace") {
         if (!state.trace.items.length) found.checker.push(["bad", "Choose at least one thing the student answers (tab 2)."]);
@@ -856,8 +952,31 @@ async function runChecks() {
             if (mine !== checkSeq) return;
             exp.forEach((o, i) => {
                 const el = $("testExp" + i);
-                if (el) { el.textContent = outputText(o); el.className = "expected" + (o.status !== "done" ? " bad" : ""); }
+                if (el) { el.innerHTML = outputHtml(o); el.className = "expected" + (o.status !== "done" ? " bad" : ""); }
                 if (o.status !== "done") found.checker.push(["bad", "Test " + (state.tests[i].name || i + 1) + ": the reference does not finish (" + o.status + ")."]);
+            });
+            /* tests that check nothing new: no inputs at all, the same inputs, or (a note only) the same outputs */
+            const tname = i => "test " + (state.tests[i].name || i + 1);
+            const keys = state.tests.map(testInputKey);
+            const noInputs = !hasInputs(state.reference);
+            if (noInputs && state.tests.length > 1) found.checker.push(["warn", "The program has no inputs (\"ask\", variables, lists, \"pick random\"): all " + state.tests.length + " tests are the same run. Delete the extra ones."]);
+            state.tests.forEach((t, i) => {
+                const note = $("testNote" + i);
+                if (!note) return;
+                note.className = "status"; note.textContent = "";
+                if (i === 0 || noInputs) return;
+                const same = keys.findIndex((k, j) => j < i && k === keys[i]);
+                if (same >= 0) {
+                    note.className = "status warn";
+                    note.textContent = "⚠ The same inputs as " + tname(same) + ": this test checks nothing new. Change its values or delete it.";
+                    found.checker.push(["warn", "Test " + (t.name || i + 1) + " has the same inputs as " + tname(same) + "."]);
+                    return;
+                }
+                const sameOut = exp.findIndex((o, j) => j < i && ScratchQ.Checker.sameObserved(o, exp[i], state.observe));
+                if (sameOut >= 0) {
+                    note.className = "status info";
+                    note.textContent = "The reference gives the same outputs as in " + tname(sameOut) + ". Fine if that is a second case on purpose; otherwise check that the program uses these values (a \"set\" at the start replaces a test's value).";
+                }
             });
             /* the starting program: what it would get; already correct is a warning */
             const init = state.initial;
@@ -934,6 +1053,7 @@ function loadState(s, name, handle) {
     state.question.review = Object.assign({ grade: true, feedback: true, reference: true }, state.question.review || {});
     state.observe = Object.assign(defaultState().observe, state.observe || {});
     state.trace = Object.assign({ items: [{ kind: "say" }] }, state.trace || {});
+    state.drawing = Object.assign(defaultState().drawing, state.drawing || {});
     state.palette = Object.assign({ blocks: ScratchQ.Editor.ALL_BLOCKS.slice() }, state.palette || {});
     if (!state.tests || !state.tests.length) state.tests = defaultState().tests;
     if (state.observe.pen === undefined && usesPen(state.reference)) state.observe.pen = true;
@@ -1129,6 +1249,7 @@ function questionConfig() {
     if (state.kind === "trace") { cfg.tests = c.tests.slice(0, 1); cfg.trace = c.trace; }
     else {
         cfg.initial = c.initial; cfg.locks = c.locks; cfg.palette = c.palette; cfg.tests = c.tests; cfg.observe = c.observe;
+        if (c.observe.pen) cfg.drawing = c.drawing;
         if (c.mistakes.length) cfg.mistakes = c.mistakes;
     }
     const ex = clone(state);
