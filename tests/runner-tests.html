@@ -157,6 +157,46 @@ async function main() {
     const tr2 = await ScratchQ.Checker.gradeTrace(tq, { say: ["10"], vars: { i: "4" } }, "en");
     ok(tr2.grade === 50 && /1 of 2/.test(tr2.feedback), "trace: one of two", tr2);
 
+    /* ---------- motion and pen: the drawing as a set of segments ---------- */
+    const PD = ["pen_penDown"], PU = ["pen_penUp"];
+    const segs = r => JSON.stringify(ScratchQ.Drawing.merge(r.pen));
+    const square = prog({}, [GF, PD, ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
+    const rs = await R.run(square, {});
+    ok(rs.pen.length === 4 && segs(rs) === "[[0,-100,0,0],[0,-100,100,-100],[0,0,100,0],[100,-100,100,0]]", "pen: a square, 4 lines", { raw: rs.pen, merged: segs(rs) });
+    /* the same square the other way round, each side in 10 steps of 10 */
+    const square2 = prog({}, [GF, ["motion_pointindirection", { DIRECTION: 180 }], PD,
+        ["control_repeat", { TIMES: 4, SUBSTACK: [["control_repeat", { TIMES: 10, SUBSTACK: [["motion_movesteps", { STEPS: 10 }]] }], ["motion_turnleft", { DEGREES: 90 }]] }]]);
+    const rs2 = await R.run(square2, {});
+    ok(rs2.pen.length === 40 && segs(rs2) === segs(rs), "pen: the same square anticlockwise in 40 short lines is the same drawing", { n: rs2.pen.length, merged: segs(rs2) });
+    const rUp = await R.run(prog({}, [GF, PD, ["motion_movesteps", { STEPS: 50 }], PU, ["motion_movesteps", { STEPS: 50 }], PD, ["motion_movesteps", { STEPS: 50 }]]), {});
+    ok(segs(rUp) === "[[0,0,50,0],[100,0,150,0]]", "pen: pen up moves without drawing", segs(rUp));
+    const rClear = await R.run(prog({}, [GF, PD, ["motion_movesteps", { STEPS: 50 }], ["pen_clear"], ["motion_movesteps", { STEPS: 20 }]]), {});
+    ok(segs(rClear) === "[[50,0,70,0]]", "pen: erase all", segs(rClear));
+    const rGlide = await R.run(prog({}, [GF, PD, ["motion_glidesecstoxy", { SECS: 1, X: 100, Y: 100 }], ["motion_gotoxy", { X: 100, Y: 0 }], ["motion_changeyby", { DY: -50 }]]), {});
+    ok(rGlide.pen.length > 5 && segs(rGlide) === "[[0,0,100,100],[100,-50,100,100]]", "pen: glide, go to x y, change y (" + rGlide.pen.length + " raw lines)", segs(rGlide));
+    const rDot = await R.run(prog({}, [GF, PD, PU, ["motion_movesteps", { STEPS: 30 }]]), {});
+    ok(rDot.pen.length === 0, "pen: a dot is not a line", rDot.pen);
+    ok(JSON.stringify(ScratchQ.Drawing.merge([[0, 0, 10, 0], [5, 0, 20, 0], [20, 0, 15, 0], [3, 3, 3, 3]])) === "[[0,0,20,0]]", "drawing: overlapping lines merge, a dot drops");
+    const rPos = await R.run(prog({ vars: { p: 0 } }, [GF, ["motion_gotoxy", { X: 30, Y: 40 }], ["motion_turnright", { DEGREES: 90 }],
+        ["data_setvariableto", { VALUE: ["operator_join", { STRING1: ["motion_xposition"], STRING2: ["operator_join", { STRING1: ",", STRING2: ["motion_direction"] }] }] }, { VARIABLE: "p" }]]), {});
+    ok(rPos.vars.p === "30,180", "motion: x position and direction reporters", rPos.vars);
+    ok(rGlide.seconds > 0.9 && rGlide.seconds < 1.2, "glide 1 sec takes 1 virtual second (" + rGlide.seconds + " s, " + rGlide.ticks + " frames)");
+    /* two runs side by side (the checker runs the reference and the student's program together): both draw */
+    const par = await Promise.all([R.run(square, {}), R.run(square2, {}), R.run(square, {})]);
+    ok(par.every(r => r.status === "done" && ScratchQ.Drawing.merge(r.pen).length === 4), "pen: three runs side by side all draw", par.map(r => r.pen.length));
+    /* the checker: the drawing is what is checked */
+    const pq = { reference: square, observe: { say: false, pen: true } };
+    const pc = ScratchQ.Checker.create(pq);
+    const gp1 = await pc.grade(square2, "en");
+    ok(gp1.grade === 100, "checker: the anticlockwise square passes", gp1.feedback);
+    const three = prog({}, [GF, PD, ["control_repeat", { TIMES: 3, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
+    const gp2 = await pc.grade(three, "en");
+    ok(gp2.grade === 0 && /4 lines were expected; your program drew 3/.test(gp2.feedback) && /Lines missing:\n\s+⁦\(0, -100\) – \(0, 0\)⁩/.test(gp2.feedback),
+        "checker: a missing side is named", gp2.feedback);
+    const near = prog({}, [GF, PD, ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 100.3 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
+    const far = prog({}, [GF, PD, ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 101 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
+    ok((await pc.grade(near, "en")).grade === 100 && (await pc.grade(far, "en")).grade === 0, "checker: ends within 0.5 are the same, 1 is not");
+
     document.getElementById("out").textContent = out.lines.join("\n");
     window.__result = out;
     window.__done = true;

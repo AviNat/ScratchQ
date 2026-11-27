@@ -41,7 +41,21 @@ const DEFAULT_ZOOM = 0.675 * ZOOM_STEP * ZOOM_STEP;
    ============================================================ */
 /* shadows: [input, shadow type, default] ; fields: [field, value] */
 const CATEGORIES = [
-    { id: "motion", name: "Motion", colour: "#4C97FF", secondary: "#3373CC", blocks: [] },
+    /* no "if on edge, bounce", "go to (random / mouse)", "point towards": they need the stage or the mouse */
+    { id: "motion", name: "Motion", colour: "#4C97FF", secondary: "#3373CC", blocks: [
+        ["motion_movesteps", [["STEPS", "math_number", "10"]]],
+        ["motion_turnright", [["DEGREES", "math_number", "15"]]],
+        ["motion_turnleft", [["DEGREES", "math_number", "15"]]],
+        ["motion_gotoxy", [["X", "math_number", "0"], ["Y", "math_number", "0"]]],
+        ["motion_glidesecstoxy", [["SECS", "math_number", "1"], ["X", "math_number", "0"], ["Y", "math_number", "0"]]],
+        ["motion_pointindirection", [["DIRECTION", "math_angle", "90"]]],
+        ["motion_changexby", [["DX", "math_number", "10"]]],
+        ["motion_setx", [["X", "math_number", "0"]]],
+        ["motion_changeyby", [["DY", "math_number", "10"]]],
+        ["motion_sety", [["Y", "math_number", "0"]]],
+        ["motion_xposition", []],
+        ["motion_yposition", []],
+        ["motion_direction", []]] },
     { id: "looks", name: "Looks", colour: "#9966FF", secondary: "#774DCB", blocks: [
         ["looks_sayforsecs", [["MESSAGE", "text", "Hello!"], ["SECS", "math_number", "2"]]],
         ["looks_say", [["MESSAGE", "text", "Hello!"]]],
@@ -79,7 +93,12 @@ const CATEGORIES = [
         ["operator_mod", [["NUM1", "math_number", ""], ["NUM2", "math_number", ""]]],
         ["operator_round", [["NUM", "math_number", ""]]],
         ["operator_mathop", [["NUM", "math_number", ""]], [["OPERATOR", "abs"]]]] },
-    { id: "variables", name: "Variables", colour: "#FF8C1A", secondary: "#DB6E00", custom: "VARIABLE", blocks: [] }
+    { id: "variables", name: "Variables", colour: "#FF8C1A", secondary: "#DB6E00", custom: "VARIABLE", blocks: [] },
+    /* Scratch's Pen extension (its lines are what is checked; the colour and size blocks are not here) */
+    { id: "pen", name: "Pen", colour: "#0FBD8C", secondary: "#0B8E69", blocks: [
+        ["pen_clear", []],
+        ["pen_penDown", []],
+        ["pen_penUp", []]] }
 ];
 const ALL_BLOCKS = [];
 CATEGORIES.forEach(function (c) { c.blocks.forEach(function (b) { ALL_BLOCKS.push(b[0]); }); });
@@ -88,7 +107,30 @@ ALL_BLOCKS.push("VARIABLES");
 function escXml(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-const SHADOW_FIELD = { text: "TEXT", math_number: "NUM", math_positive_number: "NUM", math_whole_number: "NUM", math_integer: "NUM" };
+const SHADOW_FIELD = { text: "TEXT", math_number: "NUM", math_positive_number: "NUM", math_whole_number: "NUM", math_integer: "NUM", math_angle: "NUM" };
+
+/*
+ * The Pen blocks: in Scratch the pen is an extension and the GUI defines its blocks from the VM; scratch-blocks has
+ * none. The same blocks here, with Scratch's pen icon drawn inline and its texts.
+ */
+const PEN_ICON = "data:image/svg+xml;utf8," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">' +
+    '<path d="M8 32l3-10L27 6l7 7-16 16z" fill="#fff" stroke="#0B8E69" stroke-width="2" stroke-linejoin="round"/>' +
+    '<path d="M11 22l7 7" stroke="#0B8E69" stroke-width="2"/><path d="M8 32l3-10 7 7z" fill="#0B8E69"/></svg>');
+function definePenBlocks(SB) {
+    if (SB.Blocks.pen_penDown) return;
+    [["pen_clear", "erase all"], ["pen_penDown", "pen down"], ["pen_penUp", "pen up"]].forEach(function (d) {
+        SB.Blocks[d[0]] = {
+            init: function () {
+                this.jsonInit({
+                    message0: "%1 %2",
+                    args0: [{ type: "field_image", src: PEN_ICON, width: 24, height: 24, alt: "pen" }, { type: "field_label", text: d[1] }],
+                    extensions: ["colours_pen", "shape_statement"]
+                });
+            }
+        };
+    });
+}
 
 function blockXml(def) {
     const type = def[0], shadows = def[1] || [], fields = def[2] || [], mutation = def[3] || "";
@@ -237,6 +279,7 @@ function create(element, opts) {
     if (!VM) return Promise.reject(new Error("ScratchQ.Editor: the Scratch VM is not loaded"));
 
     SB.ScratchMsgs.setLocale("en");                                      // the blocks are in English (decided)
+    definePenBlocks(SB);
     if (!document.getElementById("scratchq-editor-css")) {
         /* the palette's checkboxes show a reporter on the stage (a monitor) - there is no stage here */
         const css = document.createElement("style");

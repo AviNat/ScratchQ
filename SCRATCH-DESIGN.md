@@ -121,8 +121,8 @@ v1 for grades 7–9: green flag; say/think (with or without secs); ask/answer; v
 | | timer, mouse, key pressed, touching, distance | ✘ | Need time or the stage. |
 | Looks | say / think (with or without secs) | ✔ | The program's **output**: a log of what was said. |
 | | costumes, size, effects, layers, show/hide | ✘ / P4 | Visual state. Could later be numbers in the state (costume #, size). |
-| Motion | x, y, direction, move, turn, go to, change x/y, point in direction, glide | P4 (could move earlier) | The VM computes these without a renderer. Without one, fencing (keeping the sprite inside the stage) is skipped (to verify). Motion is common in grade 7, so it could come earlier if wanted. |
-| Pen | pen down/up, clear | P4 | The Runner records segments from the sprite's moves while the pen is down. They are checked geometrically (order-independent, with tolerance). Nice for "draw a square"; needs a small canvas preview. |
+| Motion | move, turn ↻ / ↺, go to x y, glide secs to x y, point in direction, change / set x, change / set y, x position, y position, direction | ✔ (0.2.0, 2026-11-26) | The VM computes these without a renderer. There is no fencing: the sprite may leave the stage (Scratch would stop it at the edge). Every test starts at (0, 0), direction 90, pen up. Glide runs on the virtual clock (the VM's own glide uses a real-time Timer, so the Runner replaces it). Not included: if on edge bounce, go to random / mouse, point towards, rotation style (need the stage or the mouse). |
+| Pen | erase all, pen down, pen up | ✔ (0.2.0, 2026-11-26) | Decided: checked **without showing the drawing**. The Runner records a segment for each move of the sprite while the pen is down. The drawing = the segments merged: collinear segments that touch or overlap are one, a segment has no direction, order does not matter, a dot is dropped. Two drawings are the same when every line has a partner with both ends within 0.5. Feedback names the missing and the extra lines as (x, y) – (x, y). Colour and size are not checked (their blocks are not in the palette). scratch-blocks has no pen blocks: the editor defines them. |
 | Sound, extensions, multiple sprites, stage scripts, cloud variables | | ✘ | Out of scope. |
 
 ## 5. Interpreter
@@ -381,6 +381,9 @@ How to run the tests: `node tests/run-page.mjs tests/runner-tests.html`. `SHOT=f
 - **Locks:** Blockly's own flags are not enough, because dragging an unlocked block carries the locked ones below it. The editor checks after every change that each locked block is still in its original script, and undoes the change if not. Putting new blocks between locked ones is allowed.
 - **STACK escaping:** Scratch's blocks are nested arrays, so the code's JSON has `]]` outside strings. Inside strings it gets `\u` escapes; outside strings, a space (`] ]`).
 - **.sb3:** `vm.saveProjectSb3()` works without assets (about 1 KB), and `loadProject(arrayBuffer)` imports.
+- **Several VMs on one page (found with the pen, 0.2.0):** the VM registers an extension's blocks through a dispatcher shared by all the VMs of the page, which talks to the VM created last. A VM created while another loads takes the other's pen blocks, and the other's "pen down" does nothing. The Runner therefore creates and loads its VMs one at a time (a queue), and loads once more if the pen blocks are still missing.
+- **Glide** uses its own real-time Timer in the VM (not the runtime's clock): the Runner replaces it with the same movement on the virtual clock.
+- **In Moodle (2026-11-26):** the frame's height counted the palette's blocks scrolled out of sight (fixed: an element that clips its content counts by its own box); a value typed in a field reached the VM only when the field closed, so pressing Check right after typing graded the old program (fixed: the typed value goes to the VM at once, and the frame's blur grades a pending change). `ScratchQ.DEBUG` (or `debug: true` in the question) logs the steps to the console.
 
 ### 12.3 Not done yet
 - **The STACK probe on a real server:**
@@ -391,7 +394,8 @@ How to run the tests: `node tests/run-page.mjs tests/runner-tests.html`. `SHOT=f
 - **Trace questions:** the parameters / random variants (§7) and the built-in mutants (§6.3).
 - **Parsons** (K2) and **structural rules** (§6.2).
 - **The builder's interface language:** English only, like the math playground.
-- **Hosting:** the library must be pushed to GitHub Pages (the default folder is `https://avinat.github.io/ScratchQ/`, which does not exist yet).
+- **Hosting:** done - the library is on GitHub Pages, `https://avinat.github.io/ScratchQ/` (repository AviNat/ScratchQ).
+- **Pen:** a trace question about a drawing, and showing the drawing (a small canvas) - not wanted for now.
 
 ## 13. Open questions for the user
 1. ~~Hebrew UI~~ → decided (§0.4). ~~Grades~~ → 7–9. ~~Container~~ → STACK.

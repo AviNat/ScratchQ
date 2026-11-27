@@ -24,12 +24,16 @@
  *   { status: "done" | "timeout" | "noAnswer" | "error", message,
  *     say: [{ type: "say" | "think" | "ask", text }],          - text as the speech bubble shows it
  *     vars: { <name>: value }, lists: { <name>: [..] },
+ *     pen: [[x1, y1, x2, y2]],                                  - the lines drawn with the pen, as drawn
  *     ticks, seconds }                                          - frames (1/30 s) and virtual seconds
+ *
+ * Every test starts with the sprite at (0, 0), pointing right (90), pen up. There is no stage edge: Scratch keeps a
+ * sprite inside the stage, here it may go anywhere.
  */
 (function (global) {
 "use strict";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 /* ============================================================
    THE PROGRAM -> a Scratch 3 project (project.json)
@@ -119,40 +123,114 @@ function microtask() { return Promise.resolve(); }
  * step - no real waiting. "say/think for (n) secs" use a real setTimeout in the VM, so they are replaced by the same
  * logic as "wait". Every step's Math.random is the test's seeded generator.
  */
+/*
+ * Creating and loading the VMs one at a time. The VM registers an extension's blocks (the pen) through a dispatcher
+ * shared by all the VMs of the page, which talks to the VM created last: a VM created while another one loads gets
+ * the other's pen blocks, and the other's "pen down" does nothing. The checker runs the reference and the student's
+ * program side by side, so the loads wait in a queue - and a load that still lacks an extension's blocks (a VM made
+ * elsewhere, e.g. by an editor, at that moment) is done once again.
+ */
+let vmQueue = Promise.resolve();
+function extensionOpcodes(program) {
+    const ops = {};
+    Object.keys((program && program.blocks) || {}).forEach(function (id) {
+        const b = program.blocks[id];
+        if (b && !Array.isArray(b) && /^pen_/.test(b.opcode)) ops[b.opcode] = true;
+    });
+    return Object.keys(ops);
+}
+function loadVm(VM, project, needs) {
+    function attempt(again) {
+        const vm = new VM();
+        return vm.loadProject(project).then(function () {
+            const missing = needs.some(function (op) { return !vm.runtime._primitives[op]; });
+            if (!missing || again) return vm;
+            try { vm.quit && vm.quit(); } catch (e) { /* ignore */ }
+            return attempt(true);
+        });
+    }
+    const job = vmQueue.then(function () { return attempt(false); });
+    vmQueue = job.catch(function () { /* the next load does not depend on this one */ });
+    return job;
+}
+function toNumber(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
+
 function run(program, test, opts) {
     opts = opts || {};
     test = test || {};
-    const VM = vmClass(opts);
-    const vm = new VM();
-    const rt = vm.runtime;
-    const result = { status: "done", message: "", say: [], vars: {}, lists: {}, ticks: 0, seconds: 0 };
+    const result = { status: "done", message: "", say: [], vars: {}, lists: {}, pen: [], ticks: 0, seconds: 0 };
     const answers = (test.answers || []).slice();
-    let now = 0, noAnswer = false;
+    let now = 0, noAnswer = false, vm = null, rt = null;
 
-    /*
-     * The sequencer works 75% of currentStepTime (real time) per frame, then the frame ends - also when its only
-     * thread is waiting (wait, say for secs: a yielding thread counts as active). A small slice (0.75 ms): 6 virtual
-     * seconds of waiting cost ~180 frames x 0.75 ms instead of 180 x 25 ms. The virtual clock is separate (FRAME_MS
-     * per frame), so the slice does not change any result of one script; a long computation just takes more frames.
-     */
-    rt.currentStepTime = opts.sliceMs || 1;
-    rt.updateCurrentMSecs = function () { this.currentMSecs = now; };
+    let project;
+    try { project = toProject(program, test); } catch (e) { return Promise.resolve(failed(e)); }
+    return loadVm(vmClass(opts), project, extensionOpcodes(program)).then(function (loaded) {
+        vm = loaded;
+        rt = vm.runtime;
+        /*
+         * The sequencer works 75% of currentStepTime (real time) per frame, then the frame ends - also when its only
+         * thread is waiting (wait, say for secs: a yielding thread counts as active). A small slice (0.75 ms): 6
+         * virtual seconds of waiting cost ~180 frames x 0.75 ms instead of 180 x 25 ms. The virtual clock is separate
+         * (FRAME_MS per frame), so the slice does not change any result of one script; a long computation just takes
+         * more frames.
+         */
+        rt.currentStepTime = opts.sliceMs || 1;
+        rt.updateCurrentMSecs = function () { this.currentMSecs = now; };
 
-    rt.on("SAY", function (target, type, text) {
-        if (target && target.isStage) return;
-        const shown = bubbleText(text);
-        if (shown === "") return;                       // a bubble cleared
-        result.say.push({ type: type, text: shown });
-    });
-    rt.on("QUESTION", function (question) {
-        if (question === null) return;                  // questions cleared (stop)
-        result.say.push({ type: "ask", text: String(question) });
-        if (!answers.length) { noAnswer = true; return; }
-        rt.emit("ANSWER", String(answers.shift()));
-    });
+        rt.on("SAY", function (target, type, text) {
+            if (target && target.isStage) return;
+            const shown = bubbleText(text);
+            if (shown === "") return;                       // a bubble cleared
+            result.say.push({ type: type, text: shown });
+        });
+        rt.on("QUESTION", function (question) {
+            if (question === null) return;                  // questions cleared (stop)
+            result.say.push({ type: "ask", text: String(question) });
+            if (!answers.length) { noAnswer = true; return; }
+            rt.emit("ANSWER", String(answers.shift()));
+        });
 
-    return vm.loadProject(toProject(program, test)).then(function () {
         const p = rt._primitives;
+        /*
+         * Glide: the VM times it with the real clock (its own Timer), not the runtime's - the same movement on the
+         * virtual clock: from where the sprite is to (x, y) in SECS, one position per frame.
+         */
+        p.motion_glidesecstoxy = function (args, util) {
+            const f = util.stackFrame;
+            if (f.sqGlideStart === undefined) {
+                f.sqGlideStart = now;
+                f.sqDuration = toNumber(args.SECS) * 1000;
+                f.sqX0 = util.target.x; f.sqY0 = util.target.y;
+                f.sqX1 = toNumber(args.X); f.sqY1 = toNumber(args.Y);
+                if (f.sqDuration <= 0) { util.target.setXY(f.sqX1, f.sqY1); return; }
+                util.yield();
+                return;
+            }
+            const t = (now - f.sqGlideStart) / f.sqDuration;
+            if (t < 1) {
+                util.target.setXY(f.sqX0 + (f.sqX1 - f.sqX0) * t, f.sqY0 + (f.sqY1 - f.sqY0) * t);
+                util.yield();
+            } else {
+                util.target.setXY(f.sqX1, f.sqY1);
+            }
+        };
+        /*
+         * The pen without a stage: every move of the sprite while its pen is down is a line, from where it was to
+         * where it is ("move", "go to", "change x", each frame of a glide). The pen extension keeps penDown in the
+         * sprite's custom state; it draws nothing here (no renderer). "erase all" empties the drawing. A dot (pen
+         * down without moving) is not a line.
+         */
+        const sprite = rt.targets.find(function (t) { return !t.isStage; });
+        if (sprite && sprite.on) {
+            sprite.on("TARGET_MOVED", function (t, oldX, oldY) {
+                const pen = t.getCustomState && t.getCustomState("Scratch.pen");
+                if (pen && pen.penDown && (oldX !== t.x || oldY !== t.y)) result.pen.push([oldX, oldY, t.x, t.y]);
+            });
+        }
+        if (p.pen_clear) {
+            const clear = p.pen_clear;
+            p.pen_clear = function (args, util) { result.pen.length = 0; return clear(args, util); };
+        }
         const wait = p.control_wait;
         if (wait) {
             ["say", "think"].forEach(function (kind) {
@@ -192,14 +270,16 @@ function run(program, test, opts) {
             return microtask().then(loop);
         }
         return microtask().then(loop);
-    }).catch(function (e) {
+    }).catch(failed);
+
+    function failed(e) {
         result.status = "error";
         result.message = e && e.message ? e.message : String(e);
         return finish();
-    });
-
+    }
     function finish() {
         result.seconds = Math.round(now) / 1000;
+        if (!rt) return result;
         try {
             rt.stopAll();
             rt.targets.forEach(function (t) {
@@ -253,7 +333,7 @@ function hasScript(program) {
 /*
  * The question's checking settings (part of the question configuration):
  *   tests:   [{ name, vars, lists, answers, seed, hidden }]       - none: one test with the program's own values
- *   observe: { say: true, vars: [names], lists: [names], caseSensitive: false }
+ *   observe: { say: true, vars: [names], lists: [names], pen: false, caseSensitive: false }   - pen: the drawing
  *   mistakes: [{ program, message: { he, ar, en }, score }]       - teacher mistake programs (score 0..100 or null)
  */
 const TEXT = {
@@ -263,7 +343,9 @@ const TEXT = {
         error: "The program could not run: {m}", expectedSay: "Expected the sprite to say: {e}", gotSay: "Your program said: {g}", nothing: "(nothing)",
         expectedVar: "Expected {v} = {e}; it is {g}.", expectedList: "Expected the list {v} = [{e}]; it is [{g}].",
         traceCorrect: "Correct.", traceWrong: "{p} of {n} answers are correct.", traceSay: "What the sprite says", traceVar: "The value of {v}", traceList: "The list {v}",
-        reference: "The correct program:", correctAnswer: "The correct answer:", empty: "No answer was given."
+        reference: "The correct program:", correctAnswer: "The correct answer:", empty: "No answer was given.",
+        drawingCount: "The drawing: {e} lines were expected; your program drew {g}.", missingLines: "Lines missing:",
+        extraLines: "Lines that should not be there:", more: "... and {n} more"
     },
     he: {
         passed: "עברו {p} מתוך {n} בדיקות.", allPassed: "נכון - כל {n} הבדיקות עברו.", noScript: "אין בתוכנית תסריט שמתחיל בדגל הירוק.",
@@ -271,7 +353,9 @@ const TEXT = {
         error: "לא ניתן להריץ את התוכנית: {m}", expectedSay: "הדמות הייתה צריכה לומר: {e}", gotSay: "התוכנית שלך אמרה: {g}", nothing: "(כלום)",
         expectedVar: "היה צריך להיות {v} = {e}; הערך הוא {g}.", expectedList: "הרשימה {v} הייתה צריכה להיות [{e}]; היא [{g}].",
         traceCorrect: "נכון.", traceWrong: "{p} מתוך {n} תשובות נכונות.", traceSay: "מה הדמות אומרת", traceVar: "הערך של {v}", traceList: "הרשימה {v}",
-        reference: "התוכנית הנכונה:", correctAnswer: "התשובה הנכונה:", empty: "לא ניתנה תשובה."
+        reference: "התוכנית הנכונה:", correctAnswer: "התשובה הנכונה:", empty: "לא ניתנה תשובה.",
+        drawingCount: "הציור: היו צריכים להיות {e} קווים; התוכנית שלך ציירה {g}.", missingLines: "קווים חסרים:",
+        extraLines: "קווים מיותרים:", more: "... ועוד {n}"
     },
     ar: {
         passed: "نجح {p} من {n} اختبارات.", allPassed: "صحيح - نجحت جميع الاختبارات ({n}).", noScript: "لا يوجد في البرنامج نص برمجي يبدأ بالعلم الأخضر.",
@@ -279,7 +363,9 @@ const TEXT = {
         error: "تعذّر تشغيل البرنامج: {m}", expectedSay: "كان يجب أن يقول الكائن: {e}", gotSay: "قال برنامجك: {g}", nothing: "(لا شيء)",
         expectedVar: "كان يجب أن يكون {v} = {e}؛ القيمة {g}.", expectedList: "كان يجب أن تكون القائمة {v} = [{e}]؛ هي [{g}].",
         traceCorrect: "صحيح.", traceWrong: "{p} من {n} إجابات صحيحة.", traceSay: "ماذا يقول الكائن", traceVar: "قيمة {v}", traceList: "القائمة {v}",
-        reference: "البرنامج الصحيح:", correctAnswer: "الإجابة الصحيحة:", empty: "لم تُعطَ إجابة."
+        reference: "البرنامج الصحيح:", correctAnswer: "الإجابة الصحيحة:", empty: "لم تُعطَ إجابة.",
+        drawingCount: "الرسم: كان يجب رسم {e} خطوط؛ رسم برنامجك {g}.", missingLines: "خطوط ناقصة:",
+        extraLines: "خطوط زائدة:", more: "... و{n} أخرى"
     }
 };
 function supportedLanguage(code) {
@@ -307,11 +393,77 @@ function sameList(a, b, cs) {
     return a.length === b.length && a.every(function (v, i) { return sameValue(v, b[i], cs); });
 }
 
-/* what a test observes of a run: the say log (say / think, not the questions), chosen variables and lists */
+/* ============================================================
+   THE DRAWING - the pen's lines as a set of segments
+   ============================================================ */
+/*
+ * The same drawing however it was drawn: lines on one straight line that touch or overlap are one line (ten "move 10"
+ * = one "move 100"; a line drawn twice = once), and a line has no direction (A-B = B-A). The result: segments
+ * [x1, y1, x2, y2] with the smaller point first, sorted - in any order of drawing the same list.
+ */
+const SAME_POINT = 0.5;                        // two drawings are the same when their ends are this close (pixels)
+function mergeSegments(raw) {
+    const groups = {};
+    (raw || []).forEach(function (s) {
+        const dx = s[2] - s[0], dy = s[3] - s[1], len = Math.sqrt(dx * dx + dy * dy);
+        if (!(len > 1e-6)) return;                                   // a dot
+        let ux = dx / len, uy = dy / len;
+        if (ux < -1e-9 || (Math.abs(ux) <= 1e-9 && uy < 0)) { ux = -ux; uy = -uy; }
+        /* the line: its direction (an angle, -90..90 degrees) and its distance from (0, 0) */
+        const key = Math.round(Math.atan2(uy, ux) * 1e4) + "|" + Math.round((-uy * s[0] + ux * s[1]) * 100);
+        const g = groups[key] || (groups[key] = { ux: ux, uy: uy, parts: [] });
+        const a = { t: g.ux * s[0] + g.uy * s[1], x: s[0], y: s[1] }, b = { t: g.ux * s[2] + g.uy * s[3], x: s[2], y: s[3] };
+        g.parts.push(a.t <= b.t ? [a, b] : [b, a]);
+    });
+    const out = [];
+    Object.keys(groups).forEach(function (k) {
+        const parts = groups[k].parts.sort(function (p, q) { return p[0].t - q[0].t; });
+        let cur = null;
+        parts.forEach(function (p) {
+            if (cur && p[0].t <= cur[1].t + 0.01) { if (p[1].t > cur[1].t) cur[1] = p[1]; return; }
+            if (cur) out.push(cur);
+            cur = [p[0], p[1]];
+        });
+        if (cur) out.push(cur);
+    });
+    function r(v) { const x = Math.round(v * 1000) / 1000; return x === 0 ? 0 : x; }
+    return out.map(function (p) {
+        const s = [r(p[0].x), r(p[0].y), r(p[1].x), r(p[1].y)];
+        return (s[0] < s[2] || (s[0] === s[2] && s[1] <= s[3])) ? s : [s[2], s[3], s[0], s[1]];
+    }).sort(function (a, b) { return a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]; });
+}
+function samePoint(ax, ay, bx, by) { return Math.abs(ax - bx) <= SAME_POINT && Math.abs(ay - by) <= SAME_POINT; }
+function sameSegment(a, b) {
+    return (samePoint(a[0], a[1], b[0], b[1]) && samePoint(a[2], a[3], b[2], b[3])) ||
+        (samePoint(a[0], a[1], b[2], b[3]) && samePoint(a[2], a[3], b[0], b[1]));
+}
+/* two merged drawings: which lines of each have no partner in the other */
+function compareDrawings(exp, got) {
+    exp = exp || []; got = got || [];
+    const used = got.map(function () { return false; });
+    const missing = [];
+    exp.forEach(function (e) {
+        const i = got.findIndex(function (g, k) { return !used[k] && sameSegment(e, g); });
+        if (i >= 0) used[i] = true; else missing.push(e);
+    });
+    return { missing: missing, extra: got.filter(function (g, k) { return !used[k]; }) };
+}
+function sameDrawing(a, b) {
+    const d = compareDrawings(a, b);
+    return !d.missing.length && !d.extra.length;
+}
+/* a line as people read it: (0, 0) - (100, 0); isolated left-to-right inside Hebrew / Arabic text */
+function segmentText(s) {
+    function n(v) { const x = Math.round(v * 100) / 100; return String(x === 0 ? 0 : x); }
+    return "⁦(" + n(s[0]) + ", " + n(s[1]) + ") – (" + n(s[2]) + ", " + n(s[3]) + ")⁩";
+}
+
+/* what a test observes of a run: the say log (say / think, not the questions), chosen variables and lists, the drawing */
 function observed(run, observe) {
     observe = observe || { say: true };
     const o = { status: run.status, message: run.message };
     if (observe.say !== false) o.say = run.say.filter(function (s) { return s.type !== "ask"; }).map(function (s) { return s.text; });
+    if (observe.pen) o.pen = mergeSegments(run.pen);
     o.vars = {};
     (observe.vars || []).forEach(function (n) { o.vars[n] = run.vars[n]; });
     o.lists = {};
@@ -322,6 +474,7 @@ function sameObserved(a, b, observe) {
     const cs = !!(observe && observe.caseSensitive);
     if (a.status !== b.status && (a.status !== "done" || b.status !== "done")) return false;
     if (a.say || b.say) { if (!sameList(a.say, b.say, cs)) return false; }
+    if (a.pen || b.pen) { if (!sameDrawing(a.pen, b.pen)) return false; }
     if (Object.keys(a.vars).some(function (n) { return !sameValue(a.vars[n], b.vars[n], cs); })) return false;
     if (Object.keys(a.lists).some(function (n) { return !sameList(a.lists[n], b.lists[n], cs); })) return false;
     return true;
@@ -381,6 +534,18 @@ function failLines(lang, exp, got, observe) {
         lines.push(sayText(exp.say, tr(lang, "nothing"), "\n    ").replace(/^/, "    "));
         lines.push(tr(lang, "gotSay", { g: "" }).trim());
         lines.push(sayText(got.say, tr(lang, "nothing"), "\n    ").replace(/^/, "    "));
+    }
+    if (exp.pen || got.pen) {
+        const d = compareDrawings(exp.pen, got.pen);
+        if (d.missing.length || d.extra.length) {
+            lines.push(tr(lang, "drawingCount", { e: (exp.pen || []).length, g: (got.pen || []).length }));
+            [["missingLines", d.missing], ["extraLines", d.extra]].forEach(function (part) {
+                if (!part[1].length) return;
+                lines.push(tr(lang, part[0]));
+                part[1].slice(0, 6).forEach(function (s) { lines.push("    " + segmentText(s)); });
+                if (part[1].length > 6) lines.push("    " + tr(lang, "more", { n: part[1].length - 6 }));
+            });
+        }
     }
     Object.keys(exp.vars).forEach(function (n) {
         if (!sameValue(exp.vars[n], got.vars[n], cs)) lines.push(tr(lang, "expectedVar", { v: n, e: exp.vars[n], g: got.vars[n] === undefined ? "?" : got.vars[n] }));
@@ -546,6 +711,7 @@ const ScratchQ = {
     sayText: sayText,
     sayLines: sayLines,
     expandSayLines: expandSayLines,
+    Drawing: { merge: mergeSegments, compare: compareDrawings, same: sameDrawing, segmentText: segmentText, SAME_POINT: SAME_POINT },
     Checker: { create: createChecker, runTests: runTests, observed: observed, sameObserved: sameObserved, traceExpected: traceExpected, gradeTrace: gradeTrace },
     TEXT: TEXT,
     supportedLanguage: supportedLanguage,

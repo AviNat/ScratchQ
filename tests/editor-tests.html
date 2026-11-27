@@ -122,6 +122,21 @@ try {
     await sleep(200);
     ok(!before && flyTypes(ve.workspace).includes("data_setvariableto"), "palette: set appears once a variable is made", { before });
     ve.dispose();
+
+    /* motion and pen: in the palette, and a program with them loads, shows and comes back unchanged */
+    const sq =prog({}, [GF, ["pen_clear"], ["pen_penDown"], ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }], ["pen_penUp"]]);
+    const pHost = document.createElement("div");
+    document.body.appendChild(pHost);
+    const pe = await ScratchQ.Editor.create(pHost, { ScratchBlocks: SB, program: sq, height: 300 });
+    await sleep(200);
+    ok(["motion_movesteps", "motion_turnright", "motion_glidesecstoxy", "pen_penDown", "pen_penUp", "pen_clear"].every(t => flyTypes(pe.workspace).includes(t)),
+        "palette (all blocks): Motion and Pen", flyTypes(pe.workspace).filter(t => /^(motion|pen)_/.test(t)));
+    const shown = pe.workspace.getAllBlocks(false).map(b => b.type);
+    ok(["pen_penDown", "pen_penUp", "pen_clear", "motion_movesteps"].every(t => shown.includes(t)) && ScratchQ.sameProgram(pe.getProgram(), sq),
+        "a pen program shows in the editor and comes back the same", shown);
+    const drawn = await ScratchQ.Runner.run(pe.getProgram(), {});
+    ok(ScratchQ.Drawing.merge(drawn.pen).length === 4, "the editor's program draws the square", drawn.pen.length);
+    pe.dispose();
 } catch (e) {
     ok(false, "exception: " + (e && e.stack || e));
 }

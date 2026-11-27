@@ -139,6 +139,23 @@ try {
     const sprite = vm2.runtime.targets.find(t => !t.isStage);
     ok(blob.size > 300 && Object.values(sprite.blocks._blocks).some(b => b.opcode === "control_repeat"), "an .sb3 export loads back (" + blob.size + " bytes)");
 
+    /* a pen exercise: the drawing is checked, the outputs list the lines, a missing side is named */
+    const square = n => prog({}, [["event_whenflagclicked"], ["pen_clear"], ["pen_penDown"],
+        ["control_repeat", { TIMES: n, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }]]);
+    const penEx = JSON.parse(JSON.stringify(B.state));
+    Object.assign(penEx, { reference: square(4), initial: null, locks: {}, mistakes: [], tests: [{ name: "1", vars: {}, lists: {}, answers: [], seed: 1, hidden: false }],
+        observe: { say: true, vars: [], lists: [], caseSensitive: false } });
+    B.loadState(penEx, "square.scratchq", null);
+    await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).some(b => b.type === "pen_penDown"));
+    await B.runChecks();
+    await sleep(300);
+    ok(B.state.observe.pen === true && $("observeBox").querySelector("input[data-obs=pen]:checked"), "pen: the drawing is checked (ticked by itself)");
+    ok(/draws 4 lines:\n\s+.*\(0, -100\) – \(0, 0\)/.test($("testExp0").textContent), "pen: the test shows the reference's lines", $("testExp0").textContent);
+    const pg = await ScratchQ.Checker.create(B.questionConfig()).grade(square(3), "en");
+    ok(pg.grade === 0 && /Lines missing:/.test(pg.feedback), "pen: three sides of the square get 0 and the missing side", pg.feedback);
+    B.loadState(ex, "sum-1-to-n.scratchq", null);
+    await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).length > 5);
+
     /* the trace kind */
     document.querySelector("input[name=kind][value=trace]").click();
     await B.runChecks();

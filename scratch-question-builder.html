@@ -379,6 +379,7 @@ function opcodes(program) {
 }
 function usesAsk(p) { return opcodes(p).has("sensing_askandwait"); }
 function usesRandom(p) { return opcodes(p).has("operator_random"); }
+function usesPen(p) { return opcodes(p).has("pen_penDown"); }
 function varNames(p) { return ((p && p.variables) || []).map(v => v.name); }
 function listNames(p) { return ((p && p.lists) || []).map(l => l.name); }
 
@@ -417,7 +418,12 @@ const BLOCK_LABELS = {
     operator_and: "⟨⟨ ⟩ and ⟨ ⟩⟩", operator_or: "⟨⟨ ⟩ or ⟨ ⟩⟩", operator_not: "⟨not ⟨ ⟩⟩", operator_join: "join ( ) ( )",
     operator_letter_of: "letter (1) of ( )", operator_length: "length of ( )", operator_contains: "⟨( ) contains ( )?⟩",
     operator_mod: "( ) mod ( )", operator_round: "round ( )", operator_mathop: "[abs] of ( )",
-    VARIABLES: "the Variables category (\"Make a Variable\", set, change, …)"
+    VARIABLES: "the Variables category (\"Make a Variable\", set, change, …)",
+    motion_movesteps: "move (10) steps", motion_turnright: "turn ↻ (15) degrees", motion_turnleft: "turn ↺ (15) degrees",
+    motion_gotoxy: "go to x: (0) y: (0)", motion_glidesecstoxy: "glide (1) secs to x: (0) y: (0)", motion_pointindirection: "point in direction (90)",
+    motion_changexby: "change x by (10)", motion_setx: "set x to (0)", motion_changeyby: "change y by (10)", motion_sety: "set y to (0)",
+    motion_xposition: "(x position)", motion_yposition: "(y position)", motion_direction: "(direction)",
+    pen_clear: "erase all", pen_penDown: "pen down", pen_penUp: "pen up"
 };
 function renderPaletteChoices() {
     const chosen = new Set(state.palette.blocks || []);
@@ -517,6 +523,8 @@ function referenceChanged(program) {
     const vn = varNames(program), ln = listNames(program);
     state.observe.vars = state.observe.vars.filter(n => vn.indexOf(n) >= 0);
     state.observe.lists = state.observe.lists.filter(n => ln.indexOf(n) >= 0);
+    /* the first "pen down" in the reference: the drawing is checked (the teacher may untick it) */
+    if (state.observe.pen === undefined && usesPen(program)) state.observe.pen = true;
     state.trace.items = state.trace.items.filter(it => it.kind === "say" || (it.kind === "var" ? vn : ln).indexOf(it.name) >= 0);
     if (!state.trace.items.length) state.trace.items = [{ kind: "say" }];
     /* the tests' values of variables / lists that no longer exist */
@@ -534,6 +542,10 @@ function renderObserve() {
     const box = $("observeBox");
     const o = state.observe;
     let html = "<label class=\"check\"><input type=\"checkbox\" data-obs=\"say\"" + (o.say !== false ? " checked" : "") + "> <span>What the sprite says or thinks (in order)</span></label>";
+    if (o.pen || usesPen(state.reference)) {
+        html += "<label class=\"check\"><input type=\"checkbox\" data-obs=\"pen\"" + (o.pen ? " checked" : "") + "> <span>The drawing: the lines drawn with the pen " +
+            "(in any order and direction; lines that continue each other on one straight line count as one; ends within " + ScratchQ.Drawing.SAME_POINT + ")</span></label>";
+    }
     varNames(state.reference).forEach(n => {
         html += "<label class=\"check\"><input type=\"checkbox\" data-obs=\"var\" data-name=\"" + esc(n) + "\"" + (o.vars.indexOf(n) >= 0 ? " checked" : "") + "> <span>The final value of the variable <b>" + esc(n) + "</b></span></label>";
     });
@@ -546,6 +558,7 @@ function renderObserve() {
 $("observeBox").addEventListener("change", () => {
     const o = state.observe;
     o.say = !!$("observeBox").querySelector("input[data-obs=say]:checked");
+    o.pen = !!$("observeBox").querySelector("input[data-obs=pen]:checked");
     o.vars = Array.from($("observeBox").querySelectorAll("input[data-obs=var]:checked")).map(i => i.dataset.name);
     o.lists = Array.from($("observeBox").querySelectorAll("input[data-obs=list]:checked")).map(i => i.dataset.name);
     changed();
@@ -638,6 +651,11 @@ function outputText(o) {
     if (o.status === "noAnswer") lines.push("⚠ It asked more questions than the answers given.");
     if (o.status === "error") lines.push("⚠ Error: " + o.message);
     if (o.say) lines.push(o.say.length ? "says:\n  " + ScratchQ.sayText(o.say, "", "\n  ") : "says: (nothing)");
+    if (o.pen) {
+        lines.push("draws " + o.pen.length + (o.pen.length === 1 ? " line" : " lines") + (o.pen.length ? ":" : ""));
+        o.pen.slice(0, 12).forEach(s => lines.push("  " + ScratchQ.Drawing.segmentText(s)));
+        if (o.pen.length > 12) lines.push("  … and " + (o.pen.length - 12) + " more");
+    }
     Object.keys(o.vars || {}).forEach(n => lines.push(n + " = " + o.vars[n]));
     Object.keys(o.lists || {}).forEach(n => lines.push("list " + n + " = [" + (o.lists[n] || []).join(", ") + "]"));
     if (!lines.length) lines.push("(nothing is checked - choose what is checked above)");
@@ -830,7 +848,7 @@ async function runChecks() {
             $("traceExpected").className = "expected" + (exp.status !== "done" ? " bad" : "");
         } else $("traceExpected").textContent = "";
     } else {
-        if (state.observe.say === false && !state.observe.vars.length && !state.observe.lists.length) found.checker.push(["bad", "Nothing is checked: choose what is checked (tab 2)."]);
+        if (state.observe.say === false && !state.observe.pen && !state.observe.vars.length && !state.observe.lists.length) found.checker.push(["bad", "Nothing is checked: choose what is checked (tab 2)."]);
         if (!(state.palette.blocks || []).length) found.palette.push(["warn", "The palette is empty: the student can only use the blocks of the starting program."]);
         if (has) {
             const exp = await c.reference();
@@ -917,6 +935,7 @@ function loadState(s, name, handle) {
     state.trace = Object.assign({ items: [{ kind: "say" }] }, state.trace || {});
     state.palette = Object.assign({ blocks: ScratchQ.Editor.ALL_BLOCKS.slice() }, state.palette || {});
     if (!state.tests || !state.tests.length) state.tests = defaultState().tests;
+    if (state.observe.pen === undefined && usesPen(state.reference)) state.observe.pen = true;
     fileName = name || ""; fileHandle = handle || null; dirty = false;
     renderAll();
 }
