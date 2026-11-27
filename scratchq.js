@@ -464,7 +464,8 @@ function segmentText(s) {
 /*
  * A drawing as an SVG image (text: no DOM needed). Scratch's coordinates: x to the right, y up. The view fits the
  * drawing and the starting point (0, 0), with a margin of one grid square, on whole grid squares.
- *   opts: { grid: true, axes: true, width: 360 (px), color, title, fit: [segments] }
+ *   opts: { grid: true, axes: true, width: 360 (px), size, color, title, fit: [segments] }
+ * size (px): instead of width - the picture fits a size x size square, so a tall drawing is not taller than size.
  * fit: more lines the view must hold (not drawn) - two pictures side by side on the same scale and place.
  * The same picture in the builder (the question's text, "Copy SVG") and for the student.
  */
@@ -488,7 +489,9 @@ function drawingSvg(segments, opts) {
     x0 = (Math.floor(x0 / step) - 1) * step; x1 = (Math.ceil(x1 / step) + 1) * step;
     y0 = (Math.floor(y0 / step) - 1) * step; y1 = (Math.ceil(y1 / step) + 1) * step;
     const w = x1 - x0, h = y1 - y0;
-    const width = opts.width || 360, height = Math.round(width * h / w);
+    /* size: the picture fits a size x size square (its longer side is size); else width, the height in proportion */
+    const width = opts.size > 0 ? Math.round(w >= h ? opts.size : opts.size * w / h) : (opts.width || 360);
+    const height = Math.round(width * h / w);
     const u = w / width;                                   // one pixel in drawing units
     function n(v) { const r = Math.round(v * 100) / 100; return String(r === 0 ? 0 : r); }
     const out = [];

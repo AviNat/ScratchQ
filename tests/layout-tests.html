@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>ScratchQ layout tests - the editor in an element of its own, a picture beside it</title>
+<script src="https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js"></script>
+<script src="../scratchq.js"></script>
+<script src="../scratchq-editor.js"></script>
+<script src="../scratchq-question.js"></script>
+<script src="program-helper.js"></script>
+<style>body { font-family: sans-serif; margin: 10px; width: 1200px; }</style>
+</head>
+<body>
+<p>צייר ריבוע כמו בתמונה:</p>
+<div id="row" style="display:flex;gap:16px;align-items:flex-start">
+  <div id="sq-editor" style="flex:1;min-width:0"></div>
+  <div id="pic"></div>
+</div>
+<div id="question"></div>
+<pre id="out" dir="ltr">running…</pre>
+<script type="module">
+const out = { passed: 0, failed: 0, lines: [] };
+function ok(cond, name, detail) {
+    if (cond) out.passed += 1; else out.failed += 1;
+    out.lines.push((cond ? "ok   " : "FAIL ") + name + (cond || detail === undefined ? "" : "  -> " + JSON.stringify(detail).slice(0, 600)));
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const GF = ["event_whenflagclicked"];
+const svgWidth = box => Math.round(box.querySelector("svg.blocklySvg").getBoundingClientRect().width);
+
+try {
+    const square = prog({}, [GF, ["pen_clear"], ["pen_penDown"], ["control_repeat", { TIMES: 4, SUBSTACK: [["motion_movesteps", { STEPS: 100 }], ["motion_turnright", { DEGREES: 90 }]] }], ["pen_penUp"]]);
+    const cfg = { kind: "program", language: "he", reference: square, observe: { pen: true, say: false },
+        drawing: { answering: true, review: true }, editorHostId: "sq-editor", height: 360 };
+    const pic = document.getElementById("pic");
+    pic.innerHTML = ScratchQ.Drawing.svg(ScratchQ.Drawing.merge((await ScratchQ.Runner.run(square, {})).pen), { width: 320 });
+
+    const editorBox = document.getElementById("sq-editor"), question = document.getElementById("question");
+    let saved = null;
+    await ScratchQ.Question.mount("question", cfg, { onChange: s => { saved = s; } });
+    await sleep(500);
+    ok(!!editorBox.querySelector("svg.blocklySvg") && !question.querySelector("svg.blocklySvg"), "the editor is in its own element, not in the question's");
+    const fig = editorBox.querySelector("figure");
+    ok(!!fig && fig.getBoundingClientRect().left >= editorBox.querySelector("svg.blocklySvg").getBoundingClientRect().right,
+        "the student's drawing on the right of the editor (RTL page)");
+    const w1 = svgWidth(editorBox), expected = Math.round(editorBox.getBoundingClientRect().width - fig.getBoundingClientRect().width - 16);
+    const figR = fig.querySelector("svg").getBoundingClientRect();
+    ok(Math.max(figR.width, figR.height) === 256, "the student's drawing: 256 px by default", figR);
+    ok(Math.abs(w1 - expected) <= 3 && w1 < 1200 - 320 - 256,"the editor's width: what the pictures leave (" + w1 + " px)", { w1, expected });
+    const picR = pic.getBoundingClientRect(), edR = editorBox.getBoundingClientRect();
+    ok(picR.right <= edR.left + 1 && Math.abs(picR.top - edR.top) < 2, "the picture beside the editor (RTL page: on its left)", { picR, edR });
+
+    /* the picture grows: the editor follows its element (no window resize) */
+    pic.querySelector("svg").setAttribute("width", "500");
+    pic.querySelector("svg").removeAttribute("height");
+    await sleep(300);
+    const w2 = svgWidth(editorBox);
+    ok(w2 < w1 - 150 || fig.getBoundingClientRect().top > editorBox.querySelector("svg.blocklySvg").getBoundingClientRect().bottom - 2,
+        "the editor follows its element's size (or the drawing went under it)", { w1, w2 });
+
+    /* mounted again (the review): the editor element is emptied, one editor in it */
+    await ScratchQ.Question.mount(question, cfg, { state: null, readOnly: true });
+    await sleep(300);
+    ok(editorBox.querySelectorAll("svg.blocklySvg").length === 1, "mounted again: one editor in its element", editorBox.querySelectorAll("svg.blocklySvg").length);
+
+    /* the whole question in one full-width element (the STACK frame): editor | drawing, then the feedback */
+    const full = document.createElement("div");
+    document.body.appendChild(full);
+    await ScratchQ.Question.mount(full, Object.assign({}, cfg, { editorHostId: undefined }), {});
+    await sleep(400);
+    const fSvg = full.querySelector("svg.blocklySvg").getBoundingClientRect(), fFig = full.querySelector("figure").getBoundingClientRect();
+    ok(fFig.left >= fSvg.right && Math.abs(fFig.top - fSvg.top) < 40 && fSvg.width > 700, "full width: the drawing on the right of the editor", { fSvg, fFig });
+    /* drawing.side "left" */
+    await ScratchQ.Question.mount(full, Object.assign({}, cfg, { editorHostId: undefined, drawing: { answering: true, side: "left" } }), {});
+    await sleep(400);
+    ok(full.querySelector("figure").getBoundingClientRect().right <= full.querySelector("svg.blocklySvg").getBoundingClientRect().left, "drawing.side left");
+    /* a narrow screen: the drawing under the editor */
+    full.style.width = "600px";
+    await ScratchQ.Question.mount(full, Object.assign({}, cfg, { editorHostId: undefined }), {});
+    await sleep(400);
+    ok(full.querySelector("figure").getBoundingClientRect().top >= full.querySelector("svg.blocklySvg").getBoundingClientRect().bottom - 2 &&
+        full.querySelector("svg.blocklySvg").getBoundingClientRect().width > 550, "narrow: the drawing under the editor, the editor full width");
+    full.remove();
+
+    /* no such element: the editor goes into the question's element as before */
+    const other = document.createElement("div");
+    document.body.appendChild(other);
+    await ScratchQ.Question.mount(other, Object.assign({}, cfg, { editorHostId: "nothing-here" }), {});
+    await sleep(300);
+    ok(!!other.querySelector("svg.blocklySvg"), "no element with that id: the editor is in the question's element");
+} catch (e) {
+    ok(false, "exception: " + (e && e.stack || e));
+}
+document.getElementById("out").textContent = out.lines.join("\n");
+window.__result = out;
+window.__done = true;
+</script>
+</body>
+</html>

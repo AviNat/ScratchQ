@@ -185,6 +185,7 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
     <span>Show the student's drawing:</span>
     <label class="check"><input type="checkbox" id="drawAnswering"> <span>while answering</span></label>
     <label class="check"><input type="checkbox" id="drawReview"> <span>in the review (with the correct drawing when the review shows the correct program) - for grading by hand</span></label>
+    <label class="field" title="The student's picture fits a square of this size: its width and its height are at most this">Size (px)<input type="number" id="drawSize" min="120" max="600" step="16" style="width:80px"></label>
   </div>
   <p class="hint">The grid and the axes are the same in the student's pictures. The student's picture is of the first test that is not hidden.</p>
 </section>
@@ -349,7 +350,7 @@ function defaultState() {
         tests: [{ name: "1", vars: {}, lists: {}, answers: [], seed: 1, hidden: false }],
         observe: { say: true, vars: [], lists: [], caseSensitive: false },
         trace: { items: [{ kind: "say" }] },
-        drawing: { answering: false, review: true, grid: true, axes: true },
+        drawing: { answering: false, review: true, grid: true, axes: true, size: 256 },
         mistakes: [],
         question: { target: "stack", questionId: "scratch1", inputs: { score: "ans1", state: "ans2" },
             review: { grade: true, feedback: true, reference: true }, libraryUrl: DEFAULT_LIBRARY }
@@ -513,7 +514,22 @@ document.querySelectorAll("input[name=kind]").forEach(r => r.addEventListener("c
     changed();
 }));
 $("language").addEventListener("change", () => { state.language = $("language").value; changed(); });
-$("height").addEventListener("change", () => { state.height = Math.max(200, Math.min(1200, Number($("height").value) || 460)); changed(); });
+$("height").addEventListener("change", () => {
+    state.height = Math.max(200, Math.min(1200, Number($("height").value) || 460));
+    $("height").value = state.height;
+    applyHeight();
+    changed();
+});
+/* the block area's height in the builder's editors at once: the reference, the starting program, the attempt and the
+   preview (also inside a trace question's view); the mistakes keep their small size */
+function applyHeight() {
+    ["refHost", "initHost", "attemptHost", "previewHost"].forEach(id => {
+        const box = $(id);
+        if (!box) return;
+        const eds = box.classList.contains("sq-editor") ? [box] : Array.from(box.querySelectorAll(".sq-editor"));
+        eds.forEach(e => { if (e.scratchqEditor) e.scratchqEditor.setHeight(state.height); });
+    });
+}
 
 /* the parts shown for one kind only */
 function renderKind() {
@@ -734,7 +750,8 @@ function renderDrawingSection() {
     $("drawAnswering").checked = !!d.answering;
     $("drawReview").checked = !!d.review;
     const pen = !!state.observe.pen;
-    $("drawAnswering").disabled = $("drawReview").disabled = !pen;
+    $("drawSize").value = d.size || 256;
+    $("drawAnswering").disabled = $("drawReview").disabled = $("drawSize").disabled = !pen;
     $("drawAnswering").parentElement.title = $("drawReview").parentElement.title = pen ? "" : "Only when the drawing is checked (above)";
     const mine = ++drawSeq;
     ScratchQ.Runner.run(state.reference, testForRun(state.tests[keep]), { maxMs: 400 }).then(r => {
@@ -752,6 +769,11 @@ $("drawTest").onchange = renderDrawingSection;
         renderDrawingSection();
         changed();
     });
+});
+$("drawSize").addEventListener("change", () => {
+    state.drawing.size = Math.max(120, Math.min(600, Math.round(Number($("drawSize").value) || 256)));
+    renderDrawingSection();
+    changed();
 });
 $("drawCopy").onclick = async () => {
     if (!drawingSvgText) return;

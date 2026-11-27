@@ -269,7 +269,8 @@ function registerLockMenu(SB) {
 
 /*
  * opts: { ScratchBlocks (the module), program, palette, readOnly, onChange(program), zoom, height }
- * Returns a promise of { workspace, vm, getProgram, setProgram, setPalette, dispose }.
+ * Returns a promise of { workspace, vm, getProgram, setProgram, setPalette, setHeight, dispose }; the element gets the
+ * class "sq-editor" and element.scratchqEditor = that object.
  */
 function create(element, opts) {
     opts = opts || {};
@@ -323,6 +324,20 @@ function create(element, opts) {
         scratchTheme: "classic"
     });
     if (!readOnly) workspace.registerToolboxCategoryCallback("VARIABLE", SB.ScratchVariables.getVariablesCategory);
+
+    /*
+     * The editor follows its element's size, not only the window's: in a page's own layout (beside a picture, in a
+     * flex row) the element's width changes without a window resize. The size is set by the page's CSS, so resizing
+     * the drawing does not change it again.
+     */
+    let sizeWatch = null;
+    if (global.ResizeObserver) {
+        sizeWatch = new ResizeObserver(function () {
+            if (workspace.isDisposed && workspace.isDisposed()) return;
+            SB.svgResize(workspace);
+        });
+        sizeWatch.observe(host);
+    }
 
     /*
      * The palette: scratch-blocks draws it at a fixed size (scale 0.675, 250 px wide) whatever the zoom. Here it has
@@ -517,10 +532,15 @@ function create(element, opts) {
         },
         setPalette: function (palette) { if (!readOnly) { workspace.updateToolbox(toolboxXml(palette)); refreshPalette(); } },
         resize: function () { SB.svgResize(workspace); },
+        /* the block area's height, px (the builder's "Block area height") */
+        setHeight: function (px) { host.style.height = Math.round(px) + "px"; SB.svgResize(workspace); },
         flush: flush,
-        dispose: function () { clearTimeout(changeTimer); clearTimeout(paletteTimer); workspace.dispose(); element.textContent = ""; }
+        dispose: function () { if (sizeWatch) sizeWatch.disconnect(); clearTimeout(changeTimer); clearTimeout(paletteTimer); workspace.dispose(); element.textContent = ""; }
     };
     workspace.scratchqEditor = api;
+    /* the page can find its editors: element.classList "sq-editor", element.scratchqEditor */
+    element.classList.add("sq-editor");
+    element.scratchqEditor = api;
     return setProgram(opts.program).then(function () { return api; });
 }
 

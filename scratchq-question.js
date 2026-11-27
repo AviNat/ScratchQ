@@ -8,10 +8,26 @@
  * as the math and chemistry questions do.
  *
  *   ScratchQ.Question.mountStackJs(stack_js, config)    inside a STACK [[iframe]]
- *   ScratchQ.Question.mount(element, config, options)   any other system
- *     options.state     the saved state (object, JSON or "sq1:" text) or null
- *     options.readOnly  true: the review
- *     options.onChange  function (state, score) after every change (state null: no answer)
+ *   ScratchQ.Question.mount(element, config, options)   any other system (element: an element or its id)
+ *     options.state       the saved state (object, JSON or "sq1:" text) or null
+ *     options.readOnly    true: the review
+ *     options.onChange    function (state, score) after every change (state null: no answer)
+ *     options.editorHost  an element (or its id) for the block editor alone - see config.editorHostId
+ *
+ * WHERE THE QUESTION GOES (the page's layout):
+ *   config.hostId        the element of the whole question (STACK; default "scratchq", made at the end of the page
+ *                        when there is none)
+ *   config.editorHostId  an element of its own for the block editor (a trace question: the program shown) and the
+ *                        student's drawing beside it; the feedback and the correct program stay in the question's
+ *                        element. With it the
+ *                        page decides where the editor is - e.g. a picture beside it:
+ *                          <div style="display:flex;gap:16px;align-items:flex-start">
+ *                            <div id="sq-editor" style="flex:1;min-width:0"></div>   <- the editor's width: the rest
+ *                            <div><svg ...>...</svg></div>                          <- the picture
+ *                          </div>
+ *                          <div id="scratchq"></div>
+ *                        (flex:1 and min-width:0: the editor takes the width the picture leaves; it follows the
+ *                        element's size.) No such element on the page: the editor is in the question's element.
  *
  * Needs, loaded before it: the Scratch VM (global VirtualMachine), scratchq.js, scratchq-editor.js. Loads
  * scratch-blocks itself (an ES module) unless config.scratchBlocksUrl says otherwise.
@@ -24,9 +40,12 @@
  *     inputs: { score: "ans1", state: "ans2" },           - STACK-JS only
  *     reference, initial, locks, palette,                 - programs (scratchq.js), locks (scratchq-editor.js)
  *     tests, observe, mistakes, trace: { items },         - the checking (scratchq.js, Checker)
- *     drawing: { answering, review, grid, axes },         - observe.pen only: the student's drawing shown while
- *                                                           answering / in the review (with the correct one when the
- *                                                           review shows the reference); grid and axes in the picture
+ *     drawing: { answering, review, grid, axes, side,     - observe.pen only: the student's drawing shown while
+ *                size },                                    answering (beside the editor: side "right", the default,
+ *                                                           or "left") / in the review (with the correct one when the
+ *                                                           review shows the reference); grid and axes in the picture;
+ *                                                           size: the picture fits a size x size square, px (120..600,
+ *                                                           default 256) - its height is at most size
  *     height }                                            - the block area's height in px
  *
  * The saved state: { v: 1, program | answers, grade (0..100), feedback }; in STACK "sq1:" + base64 of its JSON.
@@ -37,7 +56,7 @@
 const ScratchQ = global.ScratchQ;
 if (!ScratchQ || !ScratchQ.Editor) throw new Error("scratchq-question.js needs scratchq.js and scratchq-editor.js");
 
-const VERSION = "0.2.1";
+const VERSION = "0.3.0";
 const UI = {
     en: { answerHere: "Your answer:", sayHint: "One line for each thing the sprite says, in order. The same thing several times in a row: [10] Hello", listHint: "One item per line.",
           yourProgram: "Your program:", loading: "Loading…" },
@@ -52,6 +71,12 @@ function loadScratchBlocks(url) {
     if (global.ScratchBlocks) return Promise.resolve(global.ScratchBlocks);
     if (!sbLoading) sbLoading = import(url || ScratchQ.Editor.SCRATCH_BLOCKS_URL).then(function (m) { global.ScratchBlocks = m; return m; });
     return sbLoading;
+}
+
+/* an element, or the element with that id (null when there is none) */
+function elementOf(e) {
+    if (!e) return null;
+    return typeof e === "string" ? document.getElementById(e) : e;
 }
 
 function el(tag, css, text) {
@@ -90,12 +115,18 @@ function drawingTest(cfg) {
 function drawingOf(program, cfg) {
     return ScratchQ.Runner.run(program, drawingTest(cfg), { maxMs: 400 }).then(function (r) { return ScratchQ.Drawing.merge(r.pen); });
 }
+/* the student's (and the correct) drawing: within a size x size square, px - drawing.size, 120..600, default 256 */
+const DRAWING_SIZE = 256;
+function drawingSize(cfg) {
+    const s = Number(cfg.drawing && cfg.drawing.size);
+    return s > 0 ? Math.max(120, Math.min(600, Math.round(s))) : DRAWING_SIZE;
+}
 function drawingFigure(title, segments, cfg, fit) {
     const d = cfg.drawing || {};
     const fig = el("figure", "margin:0;display:inline-flex;flex-direction:column;gap:4px");
     fig.appendChild(el("figcaption", "font-weight:bold", title));
     const pic = el("div", "border:1px solid #ccd3db;border-radius:6px;overflow:hidden;line-height:0;width:max-content");
-    pic.innerHTML = ScratchQ.Drawing.svg(segments, { grid: d.grid !== false, axes: d.axes !== false, width: 320, fit: fit });
+    pic.innerHTML = ScratchQ.Drawing.svg(segments, { grid: d.grid !== false, axes: d.axes !== false, size: drawingSize(cfg), fit: fit });
     fig.appendChild(pic);
     return fig;
 }
@@ -138,6 +169,12 @@ function runQuestion(host, cfg, adapter) {
     const saved = ScratchQ.parseState(adapter.state);
     host.textContent = "";
     host.dir = lang === "en" ? "ltr" : "rtl";
+    /* the block editor's own element (config.editorHostId / options.editorHost), or the question's */
+    let editorHost = elementOf(adapter.editorHost || cfg.editorHostId);
+    if (editorHost && (editorHost === host || !editorHost.isConnected)) editorHost = null;   // inside the question's element: emptied above
+    if (editorHost) editorHost.textContent = "";
+    if (cfg.editorHostId && !editorHost && adapter.editorHost === undefined) debug("no element with the id \"" + cfg.editorHostId + "\": the editor is in the question's element");
+    function editorPlace(box) { (editorHost || host).appendChild(box); }
     const loading = el("div", "color:#666", ui.loading);
     host.appendChild(loading);
 
@@ -150,7 +187,7 @@ function runQuestion(host, cfg, adapter) {
     function runTrace(SB) {
         const items = (cfg.trace && cfg.trace.items) || [{ kind: "say" }];
         const progBox = el("div", "margin-bottom:10px");
-        host.appendChild(progBox);
+        editorPlace(progBox);
         const answers = (saved && saved.answers) || { say: [], vars: {}, lists: {} };
         const form = el("div", "display:grid;gap:10px;max-width:560px");
         host.appendChild(el("div", "font-weight:bold;margin:6px 0", ui.answerHere));
@@ -243,11 +280,21 @@ function runQuestion(host, cfg, adapter) {
         const checker = ScratchQ.Checker.create(cfg);
         const initial = startingProgram(cfg);
         const program = saved && saved.program ? saved.program : initial;
-        const edBox = el("div");
-        host.appendChild(edBox);
-        /* the student's drawing while answering: drawn again after each change */
-        const liveDrawing = !review && drawingShown(cfg, "answering") ? el("div", "margin-top:10px") : null;
-        if (liveDrawing) host.appendChild(liveDrawing);
+        /*
+         * The editor and, beside it, the student's drawing while answering (drawn again after each change): one row,
+         * the drawing on the right (drawing.side "left": on the left) in any page direction. A narrow screen puts the
+         * drawing under the editor. Without the drawing the editor has the whole width.
+         */
+        const edRow = el("div", "display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start");
+        edRow.dir = cfg.drawing && cfg.drawing.side === "left" ? "rtl" : "ltr";
+        const edBox = el("div", "flex:1 1 420px;min-width:0");
+        edRow.appendChild(edBox);
+        editorPlace(edRow);
+        const liveDrawing = !review && drawingShown(cfg, "answering") ? el("div", "flex:0 0 auto") : null;
+        if (liveDrawing) {
+            liveDrawing.dir = host.dir;                              // the caption in the student's language
+            edRow.appendChild(liveDrawing);
+        }
         let drawTimer = null, drawSeq = 0;
         function redraw(p) {
             if (!liveDrawing) return;
@@ -453,9 +500,12 @@ function fitFrame(stackJs) {
    ============================================================ */
 function mount(element, cfg, opts) {
     opts = opts || {};
-    return runQuestion(element, cfg, {
+    const host = elementOf(element);
+    if (!host) return Promise.reject(new Error("ScratchQ.Question.mount: no element " + JSON.stringify(element)));
+    return runQuestion(host, cfg, {
         state: opts.state || null,
         review: opts.readOnly === true,
+        editorHost: opts.editorHost,
         save: typeof opts.onChange === "function" ? opts.onChange : null
     });
 }

@@ -61,6 +61,7 @@ Every test page sets `window.__result = { passed, failed, lines }` and `window._
 | [tests/editor-tests.html](tests/editor-tests.html) | Tests for `scratchq-editor.js`. | Uses an RTL Hebrew page with LTR English blocks. Checks that a program goes from the workspace to the VM and runs the same. Edits and added blocks reach the program, and `onChange` fires. Locks hold: a locked block can't be moved, deleted or edited, and a drag that carries locked blocks away is undone. The builder's lock marking and the read-only view work. The palette shows "set" once a variable exists, has the motion and pen blocks, and the editor's program draws a square. |
 | [tests/builder-tests.js](tests/builder-tests.js) | Builder self-test. | Loaded by `scratch-question-builder.html?selftest`. Loads the example and checks every tab: the reference's outputs, the palette following tab 1, the variables, the tests, the attempt grading, the mistakes, the generated code, opening the code again, `.sb3` export, pen drawings and trace questions. Add `&tab=<name>` to end on a given tab, for a screenshot. |
 | [tests/stack-sim.html](tests/stack-sim.html) | Simulated STACK frame. | Runs `mountStackJs` with a stand-in for `stack_js` (two inputs and `resize_containing_frame`). Checks the frame's height and how soon the score input is filled after an edit. |
+| [tests/layout-tests.html](tests/layout-tests.html) | Page layout tests. | Mounts a question with `editorHostId`: the editor in its own element in a flex row beside a picture. Checks that the editor takes the width the picture leaves, follows its element's size, and stays in the question's element when no element has that id. |
 | [tests/make-example.html](tests/make-example.html) | Fixture generator. | Builds `examples/sum-1-to-n.scratchq` with `program-helper.js` and prints its JSON. |
 
 ### Other
@@ -77,6 +78,7 @@ From the ScratchQ folder:
 ```
 node tests/run-page.mjs tests/runner-tests.html
 node tests/run-page.mjs tests/editor-tests.html
+node tests/run-page.mjs tests/layout-tests.html
 node tests/run-page.mjs "scratch-question-builder.html?selftest" 240
 node tests/run-page.mjs tests/stack-sim.html 120
 ```
@@ -89,8 +91,10 @@ The second argument is the timeout in seconds. The pages need the network for th
   format is in the header of `scratchq.js`.
 - **Test**: `{ name, vars, lists, answers, seed }`.
 - **Question configuration** (the code the builder generates): `{ tool: "scratchq-question", formatVersion: 1, kind,
-  language, reference, initial, locks, palette, tests, observe, mistakes, trace, review, inputs, height }`. The full
-  format is in the header of `scratchq-question.js`.
+  language, reference, initial, locks, palette, tests, observe, mistakes, trace, review, inputs, height, hostId,
+  editorHostId }`. `hostId` names the element of the whole question. `editorHostId` names an element for the block
+  editor alone, so the page decides where the editor goes, for example beside a picture. The full format, with a
+  layout example, is in the header of `scratchq-question.js`.
 - **Saved state**: `{ v: 1, program | answers, grade, feedback }`. STACK stores it as `sq1:` + base64 JSON.
 - **Exercise file** (`.scratchq`): the builder's whole state (`tool: "scratchq-builder"`), a superset of the
   configuration.
