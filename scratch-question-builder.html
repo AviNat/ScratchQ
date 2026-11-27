@@ -464,6 +464,7 @@ $("palReference").onclick = () => {
 function paletteChanged() {
     if (editors.attempt) editors.attempt.setPalette(state.palette);
     if (editors.preview) editors.preview.setPalette(state.palette);
+    if (editors.ref) editors.ref.setPalette(state.palette);
     changed();
 }
 
@@ -1352,7 +1353,7 @@ async function renderAll() {
     renderFileState();
     Object.keys(editors).forEach(k => { try { editors[k].dispose(); } catch (e) { /* gone */ } delete editors[k]; });
     const [ref, init] = await Promise.all([
-        ScratchQ.Editor.create($("refHost"), { ScratchBlocks: SB, program: state.reference, height: state.height, onChange: p => referenceChanged(p) }),
+        ScratchQ.Editor.create($("refHost"), { ScratchBlocks: SB, program: state.reference, palette: state.palette, height: state.height, onChange: p => referenceChanged(p) }),
         ScratchQ.Editor.create($("initHost"), { ScratchBlocks: SB, program: ScratchQ.Question.startingProgram(checkConfig()), locks: state.locks, lockMenu: true, height: state.height,
             onChange: p => initialChanged(p), onLocksChange: l => { state.locks = l; renderAttempt(true); changed(); } })
     ]);

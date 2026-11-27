@@ -32,6 +32,20 @@ try {
     ok(Object.keys(B.state.locks).length === 1, "the lock of the example");
     ok(!document.querySelector("nav.tabs button.has-issue"), "no tab has an issue", Array.from(document.querySelectorAll("nav.tabs button.has-issue")).map(b => b.id));
 
+    /* the reference's palette follows tab 1 */
+    const refPalette = () => B.editors.ref.workspace.getFlyout().getWorkspace().getTopBlocks(false).map(b => b.type);
+    const offOp = "looks_say";
+    const offBox = $("paletteCats").querySelector("input[data-op=" + offOp + "]");
+    ok(offBox && offBox.checked && refPalette().includes(offOp), "the reference's palette has a block of tab 1", refPalette());
+    if (offBox) {
+        offBox.checked = false;
+        offBox.dispatchEvent(new Event("change", { bubbles: true }));
+        ok(await until(() => !refPalette().includes(offOp), 3000), "a block taken off tab 1's palette leaves the reference's palette", refPalette());
+        offBox.checked = true;
+        offBox.dispatchEvent(new Event("change", { bubbles: true }));
+        ok(await until(() => refPalette().includes(offOp), 3000), "and comes back when it is put back");
+    }
+
     /* a variable no block uses: made, then deleted - "What is checked" and the tests follow */
     const refWs = B.editors.ref.workspace;
     const hasTmp = () => !!$("observeBox").querySelector("input[data-name=tmp]") && !!$("testsBox").querySelector("input[data-f=var][data-name=tmp]");
