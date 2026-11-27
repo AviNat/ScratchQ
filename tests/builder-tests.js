@@ -62,6 +62,22 @@ try {
         await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).length > 5);
     } else ok(false, "the Pen category has a checkbox");
 
+    /* "Block area height": the builder's editors, the preview included, take it at once */
+    B.showTab("palette");
+    await until(() => B.editors.preview, 5000);
+    const blockAreaH = e => Math.round(e.workspace.getParentSvg().getBoundingClientRect().height);
+    const h0 = B.state.height;
+    $("height").value = 300;
+    $("height").dispatchEvent(new Event("change"));
+    await sleep(200);
+    /* the other tabs are hidden: their editors' set height (they draw it when their tab is shown) */
+    const setH = id => $(id).firstElementChild && $(id).firstElementChild.style.height;
+    ok(B.editors.preview && blockAreaH(B.editors.preview) === 300 && setH("refHost") === "300px" && setH("initHost") === "300px",
+        "the block area height: the preview and the editors follow at once",
+        { preview: B.editors.preview && blockAreaH(B.editors.preview), ref: setH("refHost"), init: setH("initHost") });
+    $("height").value = h0;
+    $("height").dispatchEvent(new Event("change"));
+
     /* a variable no block uses: made, then deleted - "What is checked" and the tests follow */
     const refWs = B.editors.ref.workspace;
     const hasTmp = () => !!$("observeBox").querySelector("input[data-name=tmp]") && !!$("testsBox").querySelector("input[data-f=var][data-name=tmp]");
