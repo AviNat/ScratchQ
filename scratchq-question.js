@@ -37,7 +37,7 @@
 const ScratchQ = global.ScratchQ;
 if (!ScratchQ || !ScratchQ.Editor) throw new Error("scratchq-question.js needs scratchq.js and scratchq-editor.js");
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const UI = {
     en: { answerHere: "Your answer:", sayHint: "One line for each thing the sprite says, in order. The same thing several times in a row: [10] Hello", listHint: "One item per line.",
           yourProgram: "Your program:", loading: "Loading…" },
@@ -106,7 +106,20 @@ function showFeedback(box, cfg, saved, lang) {
     if (!saved) { box.appendChild(el("div", "font-weight:bold;margin-top:8px", ScratchQ.tr(lang, "empty"))); return; }
     const lines = String(saved.feedback || "").split("\n");
     if (show.grade !== false) box.appendChild(el("div", "font-weight:bold;font-size:17px;margin-top:8px", lines[0]));
-    if (show.feedback !== false && lines.length > 1) box.appendChild(el("div", "white-space:pre-wrap;margin-top:4px", lines.slice(1).join("\n")));
+    if (show.feedback !== false && lines.length > 1) box.appendChild(feedbackBlock(lines.slice(1)));
+}
+/*
+ * The feedback, one element per line, each in its own direction (dir="auto", from its first letter): what the sprite
+ * said reads as Scratch shows it - English left to right - inside Hebrew / Arabic feedback, as in the builder's table.
+ */
+function feedbackBlock(lines) {
+    const block = el("div", "margin-top:4px");
+    lines.forEach(function (line) {
+        const d = el("div", "white-space:pre-wrap;text-align:start;min-height:1.2em", line);
+        d.dir = "auto";
+        block.appendChild(d);
+    });
+    return block;
 }
 
 /*

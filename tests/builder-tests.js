@@ -46,6 +46,22 @@ try {
         ok(await until(() => refPalette().includes(offOp), 3000), "and comes back when it is put back");
     }
 
+    /* a category's checkbox: the whole category off and on; a dash when only some of it is on */
+    const penCat = Array.from($("paletteCats").querySelectorAll(".palette-cat")).find(d => /Pen/.test(d.textContent));
+    const penBox = penCat && penCat.querySelector("input[data-cat]");
+    const penOps = () => Array.from(penCat.querySelectorAll("input[data-op]"));
+    if (penBox) {
+        const before = B.state.palette.blocks.slice();
+        penBox.checked = false; penBox.dispatchEvent(new Event("change", { bubbles: true }));
+        ok(penOps().every(i => !i.checked) && !B.state.palette.blocks.some(op => op.indexOf("pen_") === 0), "category box off: all its blocks off");
+        penOps()[0].checked = true; penOps()[0].dispatchEvent(new Event("change", { bubbles: true }));
+        ok(penBox.indeterminate && !penBox.checked, "one block of the category on: the category box shows a dash");
+        penBox.checked = true; penBox.dispatchEvent(new Event("change", { bubbles: true }));
+        ok(penOps().every(i => i.checked) && !penBox.indeterminate, "category box on: all its blocks on");
+        B.loadState(Object.assign(JSON.parse(B.fileText()), { palette: { blocks: before } }), "sum-1-to-n.scratchq", null);
+        await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).length > 5);
+    } else ok(false, "the Pen category has a checkbox");
+
     /* a variable no block uses: made, then deleted - "What is checked" and the tests follow */
     const refWs = B.editors.ref.workspace;
     const hasTmp = () => !!$("observeBox").querySelector("input[data-name=tmp]") && !!$("testsBox").querySelector("input[data-f=var][data-name=tmp]");
@@ -141,6 +157,11 @@ try {
     await sleep(500);
     ok(revHost.textContent.indexOf("בכל סיבוב") >= 0 && revHost.textContent.indexOf("התוכנית הנכונה") >= 0 && revHost.querySelectorAll(".blocklySvg").length >= 2,
         "review: the mistake's message, the reference program (Hebrew)", revHost.textContent.slice(0, 200));
+    /* the feedback line by line: what the sprite said is left to right inside the Hebrew feedback, the Hebrew right to left */
+    const fbLines = Array.from(revHost.querySelectorAll("div[dir=auto]"));
+    const saidLine = fbLines.find(d => /The sum is/.test(d.textContent)), hebLine = fbLines.find(d => /בדיקה/.test(d.textContent));
+    ok(saidLine && getComputedStyle(saidLine).direction === "ltr" && hebLine && getComputedStyle(hebLine).direction === "rtl",
+        "review feedback: the said text left to right, the Hebrew right to left", fbLines.map(d => getComputedStyle(d).direction + ":" + d.textContent).join(" | ").slice(0, 400));
     revHost.remove();
 
     /* the code opens again as an exercise (after emptying the mistakes and tests here) */
