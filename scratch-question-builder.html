@@ -864,7 +864,7 @@ function renderTraceSection() {
         const w = it && typeof it.weight === "number" ? it.weight : 1;
         return " <span class=\"hint\" style=\"margin:0 6px\">weight</span><input type=\"number\" class=\"weight\" min=\"0\" step=\"1\" style=\"width:56px\" value=\"" + w + "\"" + (it ? "" : " disabled") + " title=\"The item's weight in the grade (0 = not graded)\">";
     };
-    let html = "<label class=\"check\"><input type=\"checkbox\" data-item=\"say\"" + (has("say") ? " checked" : "") + "> <span>What the sprite says (all the lines, in order) - partial credit</span>" + weight("say") + "</label>";
+    let html = "<label class=\"check\"><input type=\"checkbox\" data-item=\"say\"" + (has("say") ? " checked" : "") + "> <span>Everything the sprite says from start to end of the run (all the lines, in order) - partial credit</span>" + weight("say") + "</label>";
     varNames(state.reference).forEach(n => {
         html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"var\" data-name=\"" + esc(n) + "\"" + (has("var", n) ? " checked" : "") + "> <span>The final value of <b>" + esc(n) + "</b></span>" + weight("var", n) + "</label>";
     });
