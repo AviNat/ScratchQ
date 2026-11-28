@@ -368,7 +368,7 @@ const TEXT = {
         drawingRight: "{m} of the {e} expected lines are drawn as expected.", more: "... and {n} more",
         yourDrawing: "Your drawing:", refDrawing: "The correct drawing:",
         traceBranch: "Which part of the if block runs?", traceBranchN: "Which part of if block no. {k} (counting from the top) runs?",
-        branchIf: "The \"if\" part", branchElse: "The \"else\" part", branchNone: "Neither: the blocks inside \"if\" do not run"
+        branchIf: "The \"then\" part", branchElse: "The \"else\" part", branchNone: "Neither: the blocks inside \"then\" do not run"
     },
     he: {
         passed: "עברו {p} מתוך {n} בדיקות.", allPassed: "נכון - כל {n} הבדיקות עברו.", noScript: "אין בתוכנית תסריט שמתחיל בדגל הירוק.",
@@ -381,7 +381,7 @@ const TEXT = {
         drawingRight: "{m} מתוך {e} הקווים הנדרשים צוירו כנדרש.", more: "... ועוד {n}",
         yourDrawing: "הציור שלך:", refDrawing: "הציור הנכון:",
         traceBranch: "איזה חלק של בלוק ה-if רץ?", traceBranchN: "איזה חלק של בלוק ה-if מספר {k} (סופרים מלמעלה) רץ?",
-        branchIf: "החלק של \"if\"", branchElse: "החלק של \"else\"", branchNone: "אף אחד: הבלוקים שבתוך \"if\" לא רצים"
+        branchIf: "החלק של \"then\"", branchElse: "החלק של \"else\"", branchNone: "אף אחד: הבלוקים שבתוך \"then\" לא רצים"
     },
     ar: {
         passed: "نجح {p} من {n} اختبارات.", allPassed: "صحيح - نجحت جميع الاختبارات ({n}).", noScript: "لا يوجد في البرنامج نص برمجي يبدأ بالعلم الأخضر.",
@@ -394,7 +394,7 @@ const TEXT = {
         drawingRight: "رُسم {m} من {e} الخطوط المطلوبة كما يجب.", more: "... و{n} أخرى",
         yourDrawing: "رسمك:", refDrawing: "الرسم الصحيح:",
         traceBranch: "أي جزء من كتلة if يعمل؟", traceBranchN: "أي جزء من كتلة if رقم {k} (العدّ من الأعلى) يعمل؟",
-        branchIf: "جزء \"if\"", branchElse: "جزء \"else\"", branchNone: "لا شيء: الكتل داخل \"if\" لا تعمل"
+        branchIf: "جزء \"then\"", branchElse: "جزء \"else\"", branchNone: "لا شيء: الكتل داخل \"then\" لا تعمل"
     }
 };
 function supportedLanguage(code) {
@@ -723,7 +723,7 @@ function createChecker(q, opts) {
 function realBlock(b) { return b && !Array.isArray(b) && !b.shadow; }
 /*
  * The blocks in reading order: the scripts from the top (then from the left), each from its hat down, a block's
- * inputs (the condition, then the "if" part, then the "else" part) before the block under it.
+ * inputs (the condition, then the "then" part, then the "else" part) before the block under it.
  */
 function blockOrder(program) {
     const blocks = (program && program.blocks) || {};
@@ -896,7 +896,8 @@ function makeVariants(specs, count, seed) {
  * q.trace.items: [{ kind: "say" } | { kind: "var", name } | { kind: "list", name } | { kind: "branch", block }]
  *   each may have weight (>= 0, default 1): the grade is the weighted mean of the items' credits;
  *   say and list items get partial credit (sequenceScore), a variable and a branch are right or wrong
- *   branch: which part of an if block (outside loops) runs - "if", "else" or "none" (an if without else skipped)
+ *   branch: which part of an if block (outside loops) runs - "if" (the "then" part, as the student sees it), "else"
+ *   or "none" (an if without else skipped); the stored value stays "if" so saved answers keep working
  * answers: { say: [lines], vars: { name: text }, lists: { name: [..] }, branches: { block: "if" | "else" | "none" } }
  * q.mistakes (a trace question): [{ answers, message: { he, ar, en }, score }] - wrong answers typed by the teacher;
  *   one matches when every answer field equals it (only in a question without random values: the builder's rule)

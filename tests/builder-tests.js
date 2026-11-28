@@ -314,7 +314,7 @@ try {
     const traceCode = B.stackCode(qc);
     ok(/mountStackJs\(stack_js,\{.*\},\{#sqvar1#\}\);\[\[\/script\]\]/.test(traceCode), "the STACK code passes the variant: {#sqvar1#}");
     const qv = await B.questionVariables();
-    ok(/^sqvar1: rand\(7\);\nsqmodels1: \["sq1:[^"]+"(, "sq1:[^"]+"){6}\];\nsqmodel1: sqmodels1\[sqvar1 \+ 1\];$/.test(qv), "the question variables: the variant and a model answer for each", qv.slice(0, 200));
+    ok(/^sqvar1: rand\(7\);\nsqmodels1: \["sq1:[^"]+"(, "sq1:[^"]+"){6}\];\nsqmodel1: sqmodels1\[ev\(sqvar1 \+ 1, simp\)\];$/.test(qv), "the question variables: the variant and a model answer for each", qv.slice(0, 200));
     /* each variant's model answer is the correct answer of that variant */
     const models = qv.split("\n")[1].match(/"sq1:[^"]+"/g).map(s => ScratchQ.parseState(s.slice(1, -1)));
     let allRight = true;

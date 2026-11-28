@@ -414,7 +414,8 @@ blockOrder, branch texts), the Runner records `branches`, `gradeTrace` matches t
 `mountStackJs(stack_js, cfg, {#sqvar1#})`, the variant in the saved state. Builder - tab 2 "Random values" (a row per
 set block, values, group, variants count, "Other variants", each variant's answer, the variant shown), "which branch"
 items, tab 3 typed mistakes, tab 5 the part number, the variant to try, the question variables
-(`sqvar1: rand(K); sqmodels1: [...]; sqmodel1: sqmodels1[sqvar1 + 1];`). Tests: `tests/trace-tests.html` (25), the
+(`sqvar1: rand(K); sqmodels1: [...]; sqmodel1: sqmodels1[ev(sqvar1 + 1, simp)];` - `ev(..., simp)` because a
+question with Auto-simplify off leaves `6+1` unevaluated: "apply: subscript must be an integer", found in Moodle 2026-11-28). Tests: `tests/trace-tests.html` (25), the
 builder self-test (66). **To verify on a real STACK server:** `{#sqvar1#}` inside the `[[script]]` of the `[[iframe]]`,
 and the question variables.
 
@@ -461,7 +462,8 @@ the mistake's.
 
 **9. The answer form: add "which branch" (decided).** Besides what the sprite says, a variable and a list.
 - The teacher picks an `if / else` (or `if`) block **outside any loop** (decided; the builder does not offer one
-  inside a loop). The student answers "the if part" / "the else part" (/ "neither" for an `if` without else).
+  inside a loop). The student answers "the then part" / "the else part" (/ "neither" for an `if` without else). Named "then" as
+  in Scratch's block "if … then" (changed 2026-11-28 from "the if part"); the stored value is still `"if"`.
 
 **10. Scoring: weights and partial credit (changed 2026-11-28; first "no weights").**
 - Each answer item (what the sprite says, a variable, a list, which branch) has a weight, 1 by default, set in the

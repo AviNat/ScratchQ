@@ -875,7 +875,7 @@ function renderTraceSection() {
     const ifs = ScratchQ.Trace.ifBlocks(state.reference);
     ifs.forEach(b => {
         const on = items.some(it => it.kind === "branch" && it.block === b.block);
-        const what = "Which part of if block no. " + b.number + (ifs.length === 1 ? "" : " (counting from the top)") + " runs" + (b.ifElse ? " - \"if\" or \"else\"" : " - \"if\" or neither");
+        const what = "Which part of if block no. " + b.number + (ifs.length === 1 ? "" : " (counting from the top)") + " runs" + (b.ifElse ? " - \"then\" or \"else\"" : " - \"then\" or neither");
         html += b.inLoop
             ? "<label class=\"check\" title=\"An if inside a loop runs several times\"><input type=\"checkbox\" disabled> <span class=\"hint\" style=\"margin:0\">" + esc(what) + " - not offered: it is inside a loop</span></label>"
             : "<label class=\"check\"><input type=\"checkbox\" data-item=\"branch\" data-block=\"" + esc(b.block) + "\"" + (on ? " checked" : "") + "> <span>" + esc(what) + "</span>" + weight("branch", b.block) + "</label>";
@@ -1782,7 +1782,7 @@ async function questionVariables() {
     const v = stackVar("sqvar");
     return v + ": rand(" + state.variants.length + ");\n" +
         stackVar("sqmodels") + ": [" + all.join(", ") + "];\n" +
-        model + ": " + stackVar("sqmodels") + "[" + v + " + 1];";
+        model + ": " + stackVar("sqmodels") + "[ev(" + v + " + 1, simp)];";   // ev: an integer also when the question does not simplify
 }
 
 function stackHelpHtml() {

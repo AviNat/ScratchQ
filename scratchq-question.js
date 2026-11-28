@@ -209,7 +209,7 @@ function runQuestion(host, cfg, adapter) {
             row.appendChild(el("span", "font-weight:bold", itemTitle(it)));
             let input;
             if (it.kind === "branch") {
-                /* the parts of the if block: radio buttons (an if without else: the "if" part or neither) */
+                /* the parts of the if block: radio buttons (an if without else: the "then" part or neither) */
                 const ifElse = cfg.reference.blocks[it.block] && cfg.reference.blocks[it.block].opcode === "control_if_else";
                 input = el("div", "display:flex;flex-direction:column;gap:2px;padding:4px 6px;border-radius:6px");
                 const chosen = (answers.branches || {})[it.block] || "";
