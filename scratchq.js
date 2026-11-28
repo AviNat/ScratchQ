@@ -25,6 +25,7 @@
  *     say: [{ type: "say" | "think" | "ask", text }],          - text as the speech bubble shows it
  *     vars: { <name>: value }, lists: { <name>: [..] },
  *     pen: [[x1, y1, x2, y2]],                                  - the lines drawn with the pen, as drawn
+ *     branches: { <if block id>: "if" | "else" | "none" },      - the part of each if block that ran (the last time)
  *     ticks, seconds }                                          - frames (1/30 s) and virtual seconds
  *
  * Every test starts with the sprite at (0, 0), pointing right (90), pen up. There is no stage edge: Scratch keeps a
@@ -33,7 +34,7 @@
 (function (global) {
 "use strict";
 
-const VERSION = "0.3.0";
+const VERSION = "0.5.0";
 
 /* ============================================================
    THE PROGRAM -> a Scratch 3 project (project.json)
@@ -154,11 +155,17 @@ function loadVm(VM, project, needs) {
     return job;
 }
 function toNumber(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
+/* a condition as Scratch reads it (scratch-vm Cast.toBoolean): "", "0" and "false" are false */
+function scratchTrue(v) {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "string") return !(v === "" || v === "0" || v.toLowerCase() === "false");
+    return Boolean(v);
+}
 
 function run(program, test, opts) {
     opts = opts || {};
     test = test || {};
-    const result = { status: "done", message: "", say: [], vars: {}, lists: {}, pen: [], ticks: 0, seconds: 0 };
+    const result = { status: "done", message: "", say: [], vars: {}, lists: {}, pen: [], branches: {}, ticks: 0, seconds: 0 };
     const answers = (test.answers || []).slice();
     let now = 0, noAnswer = false, vm = null, rt = null;
 
@@ -220,6 +227,19 @@ function run(program, test, opts) {
          * sprite's custom state; it draws nothing here (no renderer). "erase all" empties the drawing. A dot (pen
          * down without moving) is not a line.
          */
+        /*
+         * Which part of an if block runs (a trace question's "which branch"): the block being run is the top of its
+         * thread's stack; its condition as Scratch reads it (Cast.toBoolean). The last time counts.
+         */
+        ["control_if", "control_if_else"].forEach(function (op) {
+            const original = p[op];
+            if (!original) return;
+            p[op] = function (args, util) {
+                const id = util.thread && util.thread.peekStack ? util.thread.peekStack() : null;
+                if (id) result.branches[id] = scratchTrue(args.CONDITION) ? "if" : (op === "control_if_else" ? "else" : "none");
+                return original(args, util);
+            };
+        });
         const sprite = rt.targets.find(function (t) { return !t.isStage; });
         if (sprite && sprite.on) {
             sprite.on("TARGET_MOVED", function (t, oldX, oldY) {
@@ -346,7 +366,9 @@ const TEXT = {
         reference: "The correct program:", correctAnswer: "The correct answer:", empty: "No answer was given.",
         drawingCount: "The drawing: {e} lines were expected; your program drew {g}.", drawingDiffers: "The drawing is not the expected one.",
         drawingRight: "{m} of the {e} expected lines are drawn as expected.", more: "... and {n} more",
-        yourDrawing: "Your drawing:", refDrawing: "The correct drawing:"
+        yourDrawing: "Your drawing:", refDrawing: "The correct drawing:",
+        traceBranch: "Which part of the if block runs?", traceBranchN: "Which part of if block no. {k} (counting from the top) runs?",
+        branchIf: "The \"if\" part", branchElse: "The \"else\" part", branchNone: "Neither: the blocks inside \"if\" do not run"
     },
     he: {
         passed: "עברו {p} מתוך {n} בדיקות.", allPassed: "נכון - כל {n} הבדיקות עברו.", noScript: "אין בתוכנית תסריט שמתחיל בדגל הירוק.",
@@ -357,7 +379,9 @@ const TEXT = {
         reference: "התוכנית הנכונה:", correctAnswer: "התשובה הנכונה:", empty: "לא ניתנה תשובה.",
         drawingCount: "הציור: היו צריכים להיות {e} קווים; התוכנית שלך ציירה {g}.", drawingDiffers: "הציור אינו הציור הנדרש.",
         drawingRight: "{m} מתוך {e} הקווים הנדרשים צוירו כנדרש.", more: "... ועוד {n}",
-        yourDrawing: "הציור שלך:", refDrawing: "הציור הנכון:"
+        yourDrawing: "הציור שלך:", refDrawing: "הציור הנכון:",
+        traceBranch: "איזה חלק של בלוק ה-if רץ?", traceBranchN: "איזה חלק של בלוק ה-if מספר {k} (סופרים מלמעלה) רץ?",
+        branchIf: "החלק של \"if\"", branchElse: "החלק של \"else\"", branchNone: "אף אחד: הבלוקים שבתוך \"if\" לא רצים"
     },
     ar: {
         passed: "نجح {p} من {n} اختبارات.", allPassed: "صحيح - نجحت جميع الاختبارات ({n}).", noScript: "لا يوجد في البرنامج نص برمجي يبدأ بالعلم الأخضر.",
@@ -368,7 +392,9 @@ const TEXT = {
         reference: "البرنامج الصحيح:", correctAnswer: "الإجابة الصحيحة:", empty: "لم تُعطَ إجابة.",
         drawingCount: "الرسم: كان يجب رسم {e} خطوط؛ رسم برنامجك {g}.", drawingDiffers: "الرسم ليس الرسم المطلوب.",
         drawingRight: "رُسم {m} من {e} الخطوط المطلوبة كما يجب.", more: "... و{n} أخرى",
-        yourDrawing: "رسمك:", refDrawing: "الرسم الصحيح:"
+        yourDrawing: "رسمك:", refDrawing: "الرسم الصحيح:",
+        traceBranch: "أي جزء من كتلة if يعمل؟", traceBranchN: "أي جزء من كتلة if رقم {k} (العدّ من الأعلى) يعمل؟",
+        branchIf: "جزء \"if\"", branchElse: "جزء \"else\"", branchNone: "لا شيء: الكتل داخل \"if\" لا تعمل"
     }
 };
 function supportedLanguage(code) {
@@ -691,44 +717,301 @@ function createChecker(q, opts) {
     return { grade: grade, reference: reference, mistakes: mistakes };
 }
 
+/* ============================================================
+   THE PROGRAM'S STRUCTURE (trace questions: the parameters, the if blocks)
+   ============================================================ */
+function realBlock(b) { return b && !Array.isArray(b) && !b.shadow; }
 /*
- * A trace question (K1): the student writes what the shown program gives. q.trace.items: [{ kind: "say" }
- * | { kind: "var", name } | { kind: "list", name }]; answers: { say: [lines], vars: { name: text }, lists: { name: [..] } }.
+ * The blocks in reading order: the scripts from the top (then from the left), each from its hat down, a block's
+ * inputs (the condition, then the "if" part, then the "else" part) before the block under it.
+ */
+function blockOrder(program) {
+    const blocks = (program && program.blocks) || {};
+    const out = [], seen = {};
+    function visit(id) {
+        while (id && !seen[id]) {
+            const b = blocks[id];
+            if (!realBlock(b)) return;
+            seen[id] = true;
+            out.push(id);
+            Object.keys(b.inputs || {}).sort().forEach(function (k) {
+                const inp = b.inputs[k];
+                if (Array.isArray(inp) && typeof inp[1] === "string") visit(inp[1]);
+            });
+            id = b.next;
+        }
+    }
+    Object.keys(blocks).filter(function (id) { return realBlock(blocks[id]) && blocks[id].topLevel; })
+        .sort(function (a, b) { return (blocks[a].y || 0) - (blocks[b].y || 0) || (blocks[a].x || 0) - (blocks[b].x || 0); })
+        .forEach(visit);
+    return out;
+}
+const LOOPS = { control_repeat: true, control_repeat_until: true, control_forever: true, control_while: true, control_for_each: true };
+/* inside a loop: some block above it holds it in one of its inputs (the loop's body), not under it (next) */
+function insideLoop(program, id) {
+    const blocks = program.blocks || {};
+    let child = id, parent = blocks[id] && blocks[id].parent;
+    while (parent && blocks[parent]) {
+        const p = blocks[parent];
+        if (p.next !== child && LOOPS[p.opcode]) return true;
+        child = parent;
+        parent = p.parent;
+    }
+    return false;
+}
+/* the if blocks in reading order: { block, number (1, 2, ... of all the if blocks), ifElse, inLoop } */
+function ifBlocks(program) {
+    let n = 0;
+    return blockOrder(program).filter(function (id) {
+        const op = program.blocks[id].opcode;
+        return op === "control_if" || op === "control_if_else";
+    }).map(function (id) {
+        n += 1;
+        return { block: id, number: n, ifElse: program.blocks[id].opcode === "control_if_else", inLoop: insideLoop(program, id) };
+    });
+}
+
+/*
+ * PARAMETERS (random values): the number in a "set [n] to (5)" block, by the block's id. The question code carries
+ *   params:   [{ block, name }]          - the set blocks (name: the variable, for people)
+ *   variants: [[v1, v2, ..], ..]         - the values of each variant, in the order of params (made by the builder)
+ *   variant:  index                      - this student's variant (STACK: {#sqvar1#}); none or out of range: 0
+ */
+function setLiteral(program, id) {
+    const b = program && program.blocks && program.blocks[id];
+    if (!realBlock(b) || b.opcode !== "data_setvariableto") return null;
+    const inp = b.inputs && b.inputs.VALUE;
+    if (!Array.isArray(inp) || inp[0] !== 1) return null;                  // a reporter in it: not a number to change
+    if (Array.isArray(inp[1])) return { value: inp[1][1], put: function (v) { inp[1][1] = String(v); } };
+    const s = program.blocks[inp[1]];
+    if (s && s.fields && s.fields.TEXT) return { value: s.fields.TEXT[0], put: function (v) { s.fields.TEXT[0] = String(v); } };
+    if (s && s.fields && s.fields.NUM) return { value: s.fields.NUM[0], put: function (v) { s.fields.NUM[0] = String(v); } };
+    return null;
+}
+/* the set blocks a parameter can be: a number typed in them, in reading order - { block, name, value } */
+function paramCandidates(program) {
+    return blockOrder(program).filter(function (id) {
+        const lit = setLiteral(program, id);
+        return lit && isNumeric(lit.value);
+    }).map(function (id) {
+        const f = program.blocks[id].fields.VARIABLE;
+        return { block: id, name: f ? f[0] : "?", value: Number(setLiteral(program, id).value) };
+    });
+}
+/* the program with the values put into its set blocks (a copy) */
+function applyValues(program, params, values) {
+    const p = JSON.parse(JSON.stringify(program || emptyProgram()));
+    (params || []).forEach(function (par, i) {
+        const lit = setLiteral(p, par.block);
+        if (lit && values && values[i] !== undefined && values[i] !== null) lit.put(values[i]);
+    });
+    return p;
+}
+/* the question with its variant's values in the reference (once; again is the same) */
+function withVariant(q) {
+    if (!q || !q.params || !q.params.length || !q.variants || !q.variants.length) return q;
+    let i = Number(q.variant);
+    if (!(i >= 0 && i < q.variants.length && i % 1 === 0)) i = 0;
+    return Object.assign({}, q, { reference: applyValues(q.reference, q.params, q.variants[i]), variantIndex: i });
+}
+/*
+ * A parameter's values as the teacher writes them: "3..9", "3..9 step 2", "-5..5", or a list "2, 4, 7".
+ * -> { values: [numbers] } or { error }
+ */
+function parseValues(text) {
+    text = String(text === undefined || text === null ? "" : text).trim();
+    if (!text) return { error: "no values" };
+    const num = "(-?\\d+(?:\\.\\d+)?)";
+    const m = new RegExp("^" + num + "\\s*\\.\\.\\s*" + num + "(?:\\s+step\\s+" + num + ")?$", "i").exec(text);
+    if (m) {
+        const a = Number(m[1]), b = Number(m[2]), step = m[3] === undefined ? 1 : Number(m[3]);
+        if (!(step > 0)) return { error: "the step must be more than 0" };
+        if (b < a) return { error: "the range goes down (" + a + " > " + b + ")" };
+        const count = Math.floor((b - a) / step + 1e-9) + 1;
+        if (count > 1000) return { error: "more than 1000 values" };
+        const values = [];
+        for (let i = 0; i < count; i += 1) values.push(Math.round((a + i * step) * 1e9) / 1e9);
+        return { values: values };
+    }
+    const parts = text.split(/[,;\s]+/).filter(function (s) { return s !== ""; });
+    if (!parts.every(isNumeric)) return { error: "write a range (3..9, 3..9 step 2) or numbers separated by commas" };
+    const values = [];
+    parts.forEach(function (s) { const v = Number(s); if (values.indexOf(v) < 0) values.push(v); });
+    return { values: values };
+}
+/*
+ * The variants: up to `count` different value sets, picked with `seed`. specs: [{ values: [..], group }] - the
+ * parameters of one group (the same group name, not empty) never get the same value (dealt, like cards).
+ * -> { variants: [[..]], possible: the number of different value sets (or more than counted: null) }
+ */
+function makeVariants(specs, count, seed) {
+    const rnd = seededRandom(seed);
+    count = Math.max(1, Math.floor(count) || 20);
+    if (!specs.length) return { variants: [], possible: 0 };
+    function groupOk(combo) {
+        const used = {};
+        return specs.every(function (s, i) {
+            if (!s.group) return true;
+            const k = s.group + "|" + combo[i];
+            if (used[k]) return false;
+            used[k] = true;
+            return true;
+        });
+    }
+    let total = 1;
+    specs.forEach(function (s) { total *= s.values.length; });
+    if (total <= 20000) {
+        const all = [];
+        (function build(i, combo) {
+            if (i === specs.length) { if (groupOk(combo)) all.push(combo.slice()); return; }
+            specs[i].values.forEach(function (v) { combo.push(v); build(i + 1, combo); combo.pop(); });
+        })(0, []);
+        for (let i = all.length - 1; i > 0; i -= 1) {                       // shuffled with the seed
+            const j = Math.floor(rnd() * (i + 1));
+            const t = all[i]; all[i] = all[j]; all[j] = t;
+        }
+        return { variants: all.slice(0, count), possible: all.length };
+    }
+    const out = [], seen = {};
+    for (let tries = 0; out.length < count && tries < count * 200; tries += 1) {
+        const combo = [], used = {};
+        const ok = specs.every(function (s) {
+            const free = s.group ? s.values.filter(function (v) { return !used[s.group + "|" + v]; }) : s.values;
+            if (!free.length) return false;
+            const v = free[Math.floor(rnd() * free.length)];
+            if (s.group) used[s.group + "|" + v] = true;
+            combo.push(v);
+            return true;
+        });
+        const key = JSON.stringify(combo);
+        if (ok && !seen[key]) { seen[key] = true; out.push(combo); }
+    }
+    return { variants: out, possible: null };
+}
+
+/* ============================================================
+   TRACE QUESTIONS (K1) - the student writes what the shown program gives
+   ============================================================ */
+/*
+ * q.trace.items: [{ kind: "say" } | { kind: "var", name } | { kind: "list", name } | { kind: "branch", block }]
+ *   each may have weight (>= 0, default 1): the grade is the weighted mean of the items' credits;
+ *   say and list items get partial credit (sequenceScore), a variable and a branch are right or wrong
+ *   branch: which part of an if block (outside loops) runs - "if", "else" or "none" (an if without else skipped)
+ * answers: { say: [lines], vars: { name: text }, lists: { name: [..] }, branches: { block: "if" | "else" | "none" } }
+ * q.mistakes (a trace question): [{ answers, message: { he, ar, en }, score }] - wrong answers typed by the teacher;
+ *   one matches when every answer field equals it (only in a question without random values: the builder's rule)
  */
 function traceExpected(q, opts) {
+    q = withVariant(q);
     const test = testsOf(q)[0];
     return run(q.reference, test, opts).then(function (r) {
         const items = (q.trace && q.trace.items) || [{ kind: "say" }];
         return {
-            status: r.status,
+            status: r.status, variant: q.variantIndex,
             items: items.map(function (it) {
                 if (it.kind === "say") return { kind: "say", value: r.say.filter(function (s) { return s.type !== "ask"; }).map(function (s) { return s.text; }) };
                 if (it.kind === "var") return { kind: "var", name: it.name, value: r.vars[it.name] };
+                if (it.kind === "branch") return { kind: "branch", block: it.block, value: r.branches[it.block] || "none" };
                 return { kind: "list", name: it.name, value: r.lists[it.name] || [] };
             })
         };
     });
 }
+function cleanLines(lines) {
+    return (lines || []).map(function (s) { return String(s).trim(); }).filter(function (s) { return s !== ""; });
+}
+/* one answer field against a value (the correct one, or a mistake's) */
+function sameTraceItem(it, value, answers, cs) {
+    answers = answers || {};
+    if (it.kind === "say") return sameList(value, expandSayLines(cleanLines(answers.say)), cs);
+    if (it.kind === "var") return sameValue(value, (answers.vars || {})[it.name], cs);
+    if (it.kind === "branch") return String((answers.branches || {})[it.block] || "") === String(value);
+    return sameList(value, cleanLines((answers.lists || {})[it.name]), cs);
+}
+/* a mistake's answer to one item, as a value */
+function mistakeValue(it, a) {
+    a = a || {};
+    if (it.kind === "say") return expandSayLines(cleanLines(a.say));
+    if (it.kind === "var") return (a.vars || {})[it.name];
+    if (it.kind === "branch") return (a.branches || {})[it.block] || "";
+    return cleanLines((a.lists || {})[it.name]);
+}
+/*
+ * Partial credit for a sequence (the say lines, a list): the share of the expected items, less one for each edit
+ * (a wrong value, a missing one, an extra one) - an edit distance. A missing item does not shift the ones after it.
+ * A swap costs two edits (two values in wrong places); reversed values keep only what stays in place.
+ *   expected 1,3,5,7,9:  1,2,5,7,8 -> 60%   1,3,7,9 -> 80%   1,3,4,5,7,9 -> 80%   1,5,3,7,9 -> 60%   9,7,5,3,1 -> 20%
+ */
+function valueKey(v, cs) {
+    const s = String(v === undefined || v === null ? "" : v).trim();
+    if (isNumeric(s)) return "n:" + Number(s);
+    return "s:" + (cs ? s : s.toLowerCase());
+}
+function sequenceScore(expected, got, cs) {
+    const e = (expected || []).map(function (v) { return valueKey(v, cs); });
+    const g = (got || []).map(function (v) { return valueKey(v, cs); });
+    const n = e.length, m = g.length;
+    if (!n) return m ? 0 : 1;
+    if (n * m > 4e6) return e.length === g.length && e.every(function (k, i) { return k === g[i]; }) ? 1 : 0;  // too long to compare
+    /* the edit distance */
+    let dPrev = [];
+    for (let j = 0; j <= m; j += 1) dPrev.push(j);
+    for (let i = 1; i <= n; i += 1) {
+        const d = [i];
+        for (let j = 1; j <= m; j += 1) d.push(Math.min(dPrev[j] + 1, d[j - 1] + 1, dPrev[j - 1] + (e[i - 1] === g[j - 1] ? 0 : 1)));
+        dPrev = d;
+    }
+    return Math.max(0, (n - dPrev[m]) / n);
+}
+/* one answer field's credit, 0..1 */
+function traceItemScore(it, answers, cs) {
+    answers = answers || {};
+    if (it.kind === "say") return sequenceScore(it.value, expandSayLines(cleanLines(answers.say)), cs);
+    if (it.kind === "list") return sequenceScore(it.value, cleanLines((answers.lists || {})[it.name]), cs);
+    return sameTraceItem(it, it.value, answers, cs) ? 1 : 0;
+}
+function itemWeight(w) {
+    w = Number(w);
+    return w >= 0 && isFinite(w) ? w : 1;
+}
 function gradeTrace(q, answers, lang, opts) {
     lang = supportedLanguage(lang) || "en";
     const cs = !!(q.trace && q.trace.caseSensitive);
+    const defs = (q.trace && q.trace.items) || [{ kind: "say" }];
     answers = answers || {};
     return traceExpected(q, opts).then(function (exp) {
-        const marks = exp.items.map(function (it) {
-            if (it.kind === "say") {
-                const lines = expandSayLines((answers.say || []).map(function (s) { return String(s).trim(); }).filter(function (s) { return s !== ""; }));
-                return sameList(it.value, lines, cs);
-            }
-            if (it.kind === "var") return sameValue(it.value, (answers.vars || {})[it.name], cs);
-            const given = (answers.lists || {})[it.name] || [];
-            return sameList(it.value, given.map(function (s) { return String(s).trim(); }).filter(function (s) { return s !== ""; }), cs);
-        });
+        const marks = exp.items.map(function (it) { return sameTraceItem(it, it.value, answers, cs); });
+        const scores = exp.items.map(function (it, i) { return marks[i] ? 1 : traceItemScore(it, answers, cs); });
+        let weights = exp.items.map(function (it, i) { return itemWeight(defs[i] && defs[i].weight); });
+        let total = weights.reduce(function (s, w) { return s + w; }, 0);
+        if (!(total > 0)) { weights = weights.map(function () { return 1; }); total = weights.length; }
         const ok = marks.filter(Boolean).length;
-        return {
-            grade: Math.round(10000 * ok / marks.length) / 100, marks: marks, expected: exp,
-            feedback: ok === marks.length ? tr(lang, "traceCorrect") : tr(lang, "traceWrong", { p: ok, n: marks.length })
-        };
+        let grade = Math.round(10000 * scores.reduce(function (s, v, i) { return s + v * weights[i]; }, 0) / total) / 100;
+        const lines = [ok === marks.length ? tr(lang, "traceCorrect") : tr(lang, "traceWrong", { p: ok, n: marks.length })];
+        let mistake = null;
+        if (ok < marks.length) {
+            const i = (q.mistakes || []).findIndex(function (m) {
+                return m && m.answers && exp.items.every(function (it) { return sameTraceItem(it, mistakeValue(it, m.answers), answers, cs); });
+            });
+            if (i >= 0) {
+                const m = q.mistakes[i];
+                mistake = i;
+                const msg = m.message && (m.message[lang] || m.message.en || m.message.he || m.message.ar);
+                if (msg) lines.unshift(msg);
+                if (typeof m.score === "number" && m.score >= 0) grade = m.score;
+            }
+        }
+        return { grade: grade, marks: marks, scores: scores, weights: weights, expected: exp, feedback: lines.join("\n"), mistake: mistake };
     });
+}
+/* the label of a "which branch" item and the names of the answers */
+function branchTitle(lang, program, block) {
+    const all = ifBlocks(program);
+    const me = all.find(function (b) { return b.block === block; });
+    return all.length > 1 && me ? tr(lang, "traceBranchN", { k: me.number }) : tr(lang, "traceBranch");
+}
+function branchName(lang, value) {
+    return tr(lang, value === "if" ? "branchIf" : value === "else" ? "branchElse" : "branchNone");
 }
 
 /* ============================================================
@@ -784,6 +1067,9 @@ const ScratchQ = {
     expandSayLines: expandSayLines,
     Drawing: { merge: mergeSegments, compare: compareDrawings, same: sameDrawing, segmentText: segmentText, svg: drawingSvg, SAME_POINT: SAME_POINT },
     Checker: { create: createChecker, runTests: runTests, observed: observed, sameObserved: sameObserved, traceExpected: traceExpected, gradeTrace: gradeTrace },
+    Trace: { blockOrder: blockOrder, ifBlocks: ifBlocks, insideLoop: insideLoop, branchTitle: branchTitle, branchName: branchName,
+        sameItem: sameTraceItem, mistakeValue: mistakeValue, sequenceScore: sequenceScore, itemScore: traceItemScore },
+    Params: { candidates: paramCandidates, apply: applyValues, withVariant: withVariant, parseValues: parseValues, makeVariants: makeVariants },
     TEXT: TEXT,
     supportedLanguage: supportedLanguage,
     tr: tr,

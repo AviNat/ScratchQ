@@ -13,6 +13,7 @@
  *     options.readOnly    true: the review
  *     options.onChange    function (state, score) after every change (state null: no answer)
  *     options.editorHost  an element (or its id) for the block editor alone - see config.editorHostId
+ *     options.variant     the variant of a question with random values (0 .. variants - 1)
  *
  * WHERE THE QUESTION GOES (the page's layout):
  *   config.hostId        the element of the whole question (STACK; default "scratchq", made at the end of the page
@@ -36,6 +37,8 @@
  *   { tool: "scratchq-question", formatVersion: 1, questionId,
  *     language: "he" | "ar" | "en" | "system",           - the student language (all texts but the blocks)
  *     kind: "trace" | "program",                          - trace: write what the program gives; program: edit it
+ *     params, variants, variant,                          - trace: random values in set blocks (scratchq.js, Params);
+ *                                                           variant: the student's (STACK: mountStackJs's 3rd argument)
  *     review: { grade, feedback, reference },             - what the review shows (each true unless false)
  *     inputs: { score: "ans1", state: "ans2" },           - STACK-JS only
  *     reference, initial, locks, palette,                 - programs (scratchq.js), locks (scratchq-editor.js)
@@ -56,13 +59,13 @@
 const ScratchQ = global.ScratchQ;
 if (!ScratchQ || !ScratchQ.Editor) throw new Error("scratchq-question.js needs scratchq.js and scratchq-editor.js");
 
-const VERSION = "0.3.0";
+const VERSION = "0.5.0";
 const UI = {
-    en: { answerHere: "Your answer:", sayHint: "One line for each thing the sprite says, in order. The same thing several times in a row: [10] Hello", listHint: "One item per line.",
+    en: { answerHere: "Your answer:", sayHint: "One line for each thing the sprite says, in order. The same thing several times in a row:", listHint: "One item per line.",
           yourProgram: "Your program:", loading: "Loading…" },
-    he: { answerHere: "התשובה שלך:", sayHint: "שורה לכל דבר שהדמות אומרת, לפי הסדר. אותו דבר כמה פעמים ברצף: [10] Hello", listHint: "פריט אחד בכל שורה.",
+    he: { answerHere: "התשובה שלך:", sayHint: "שורה לכל דבר שהדמות אומרת, לפי הסדר. אותו דבר כמה פעמים ברצף:", listHint: "פריט אחד בכל שורה.",
           yourProgram: "התוכנית שלך:", loading: "טוען…" },
-    ar: { answerHere: "إجابتك:", sayHint: "سطر لكل ما يقوله الكائن، بالترتيب. الشيء نفسه عدة مرات متتالية: [10] Hello", listHint: "عنصر واحد في كل سطر.",
+    ar: { answerHere: "إجابتك:", sayHint: "سطر لكل ما يقوله الكائن، بالترتيب. الشيء نفسه عدة مرات متتالية:", listHint: "عنصر واحد في كل سطر.",
           yourProgram: "برنامجك:", loading: "جارٍ التحميل…" }
 };
 
@@ -163,6 +166,9 @@ function debug() { ScratchQ.log.apply(null, arguments); }
 function runQuestion(host, cfg, adapter) {
     adapter = adapter || {};
     if (cfg.debug === true) ScratchQ.DEBUG = true;               // the builder's "Console logs" option
+    /* random values: this student's variant in the program (shown and graded) */
+    cfg = ScratchQ.Params.withVariant(cfg);
+    if (cfg.variantIndex !== undefined) debug("variant " + (cfg.variantIndex + 1) + " of " + cfg.variants.length + (cfg.variantIndex !== Number(cfg.variant) ? " (given: " + JSON.stringify(cfg.variant) + ")" : ""));
     const lang = studentLanguage(cfg);
     const ui = UI[lang] || UI.en;
     const review = adapter.review === true;
@@ -177,9 +183,14 @@ function runQuestion(host, cfg, adapter) {
     function editorPlace(box) { (editorHost || host).appendChild(box); }
     const loading = el("div", "color:#666", ui.loading);
     host.appendChild(loading);
+    /* the question shown again in the same element before this one is ready (a page or the builder redraws it): the
+       newer one wins, this one stops */
+    const mountToken = {};
+    host.scratchqMount = mountToken;
 
     return loadScratchBlocks(cfg.scratchBlocksUrl).then(function (SB) {
-        host.removeChild(loading);
+        if (host.scratchqMount !== mountToken) return null;
+        if (loading.parentNode === host) host.removeChild(loading);
         return cfg.kind === "trace" ? runTrace(SB) : runProgram(SB);
     });
 
@@ -188,17 +199,35 @@ function runQuestion(host, cfg, adapter) {
         const items = (cfg.trace && cfg.trace.items) || [{ kind: "say" }];
         const progBox = el("div", "margin-bottom:10px");
         editorPlace(progBox);
-        const answers = (saved && saved.answers) || { say: [], vars: {}, lists: {} };
+        const answers = (saved && saved.answers) || { say: [], vars: {}, lists: {}, branches: {} };
         const form = el("div", "display:grid;gap:10px;max-width:560px");
         host.appendChild(el("div", "font-weight:bold;margin:6px 0", ui.answerHere));
         host.appendChild(form);
         const fields = [];
-        items.forEach(function (it) {
-            const row = el("label", "display:flex;flex-direction:column;gap:3px");
-            const title = it.kind === "say" ? ScratchQ.tr(lang, "traceSay") : ScratchQ.tr(lang, it.kind === "var" ? "traceVar" : "traceList", { v: it.name });
-            row.appendChild(el("span", "font-weight:bold", title));
+        items.forEach(function (it, n) {
+            const row = el(it.kind === "branch" ? "div" : "label", "display:flex;flex-direction:column;gap:3px");
+            row.appendChild(el("span", "font-weight:bold", itemTitle(it)));
             let input;
-            if (it.kind === "var") {
+            if (it.kind === "branch") {
+                /* the parts of the if block: radio buttons (an if without else: the "if" part or neither) */
+                const ifElse = cfg.reference.blocks[it.block] && cfg.reference.blocks[it.block].opcode === "control_if_else";
+                input = el("div", "display:flex;flex-direction:column;gap:2px;padding:4px 6px;border-radius:6px");
+                const chosen = (answers.branches || {})[it.block] || "";
+                /* one name for the block's choices (a group: one of them), unique on the page */
+                const group = "sq-branch-" + n + "-" + Math.random().toString(36).slice(2, 8);
+                (ifElse ? ["if", "else"] : ["if", "none"]).forEach(function (v) {
+                    const opt = el("label", "display:flex;gap:6px;align-items:center");
+                    const r = el("input");
+                    r.type = "radio";
+                    r.name = group;
+                    r.value = v;
+                    r.checked = chosen === v;
+                    r.disabled = review;
+                    opt.appendChild(r);
+                    opt.appendChild(el("span", "", ScratchQ.Trace.branchName(lang, v)));
+                    input.appendChild(opt);
+                });
+            } else if (it.kind === "var") {
                 input = el("input", "font:inherit;padding:5px 8px;width:220px;direction:ltr;unicode-bidi:plaintext");
                 input.type = "text";
                 input.value = answers.vars && answers.vars[it.name] !== undefined ? answers.vars[it.name] : "";
@@ -206,18 +235,33 @@ function runQuestion(host, cfg, adapter) {
                 input = el("textarea", "font:inherit;padding:5px 8px;min-height:80px;unicode-bidi:plaintext");
                 const value = it.kind === "say" ? answers.say : (answers.lists || {})[it.name];
                 input.value = (value || []).join("\n");
-                row.appendChild(el("span", "font-size:13px;color:#666", it.kind === "say" ? ui.sayHint : ui.listHint));
+                const hint = el("span", "font-size:13px;color:#666", it.kind === "say" ? ui.sayHint + " " : ui.listHint);
+                if (it.kind === "say") {
+                    /* the example is typed as in English, left to right, in any language (in RTL it would read "Hello [10]") */
+                    const ex = el("span", "font-family:Consolas,monospace;unicode-bidi:isolate", "[10] Hello");
+                    ex.dir = "ltr";
+                    hint.appendChild(ex);
+                }
+                row.appendChild(hint);
             }
             input.readOnly = review;
             row.appendChild(input);
             form.appendChild(row);
             fields.push({ item: it, input: input });
         });
+        function itemTitle(it) {
+            if (it.kind === "say") return ScratchQ.tr(lang, "traceSay");
+            if (it.kind === "branch") return ScratchQ.Trace.branchTitle(lang, cfg.reference, it.block);
+            return ScratchQ.tr(lang, it.kind === "var" ? "traceVar" : "traceList", { v: it.name });
+        }
         function read() {
-            const a = { say: [], vars: {}, lists: {} };
+            const a = { say: [], vars: {}, lists: {}, branches: {} };
             fields.forEach(function (f) {
                 if (f.item.kind === "var") a.vars[f.item.name] = f.input.value.trim();
-                else {
+                else if (f.item.kind === "branch") {
+                    const r = f.input.querySelector("input:checked");
+                    a.branches[f.item.block] = r ? r.value : "";
+                } else {
                     const lines = f.input.value.split("\n").map(function (s) { return s.trim(); }).filter(function (s) { return s !== ""; });
                     if (f.item.kind === "say") a.say = lines; else a.lists[f.item.name] = lines;
                 }
@@ -226,7 +270,8 @@ function runQuestion(host, cfg, adapter) {
         }
         function empty(a) {
             return !a.say.length && Object.keys(a.vars).every(function (k) { return a.vars[k] === ""; }) &&
-                Object.keys(a.lists).every(function (k) { return !a.lists[k].length; });
+                Object.keys(a.lists).every(function (k) { return !a.lists[k].length; }) &&
+                Object.keys(a.branches).every(function (k) { return a.branches[k] === ""; });
         }
         function grade() {
             const a = read();
@@ -240,9 +285,14 @@ function runQuestion(host, cfg, adapter) {
                     const a = read();
                     if (empty(a)) { if (adapter.save) adapter.save(null, 0); return; }
                     grade().then(function (g) {
-                        if (adapter.save) adapter.save({ v: 1, answers: g.answers, grade: g.result.grade, feedback: g.result.feedback }, g.result.grade / 100);
+                        const st = { v: 1, answers: g.answers, grade: g.result.grade, feedback: g.result.feedback };
+                        if (cfg.variantIndex !== undefined) st.variant = cfg.variantIndex;
+                        if (adapter.save) adapter.save(st, g.result.grade / 100);
                     });
                 }, 300);
+            });
+            form.addEventListener("change", function (e) {                 // a radio button sends no "input" in every browser
+                if (e.target && e.target.type === "radio") form.dispatchEvent(new Event("input"));
             });
         }
         return ScratchQ.Editor.create(progBox, { ScratchBlocks: SB, program: cfg.reference, readOnly: true, height: cfg.height || 320 }).then(function (view) {
@@ -252,12 +302,17 @@ function runQuestion(host, cfg, adapter) {
                 return grade().then(function (g) {
                     showFeedback(box, cfg, saved ? { feedback: g.result.feedback } : null, lang);
                     fields.forEach(function (f, i) {
-                        f.input.style.background = !saved ? "" : (g.result.marks[i] ? "#e6f4ea" : "#fde8e8");
+                        const s = g.result.scores ? g.result.scores[i] : (g.result.marks[i] ? 1 : 0);
+                        f.input.style.background = !saved ? "" : (s >= 1 ? "#e6f4ea" : s > 0 ? "#fff4d6" : "#fde8e8");  // right, partly, wrong
                     });
                     if (cfg.review && cfg.review.reference === false) return { view: view, grade: grade };
                     box.appendChild(el("div", "font-weight:bold;margin-top:10px", ScratchQ.tr(lang, "correctAnswer")));
                     g.result.expected.items.forEach(function (it) {
-                        const title = it.kind === "say" ? ScratchQ.tr(lang, "traceSay") : ScratchQ.tr(lang, it.kind === "var" ? "traceVar" : "traceList", { v: it.name });
+                        const title = itemTitle(it);
+                        if (it.kind === "branch") {
+                            box.appendChild(el("div", "", title + " " + ScratchQ.Trace.branchName(lang, it.value)));
+                            return;
+                        }
                         if (it.kind === "say") {
                             /* one line each, repeats counted as in the browser's console: [10] Hello */
                             box.appendChild(el("div", "", title + ":"));
@@ -404,7 +459,9 @@ function scoreText(score) {
     return (n / a) + "/" + (10000 / a);
 }
 
-function mountStackJs(stackJs, cfg) {
+/* variant: this student's variant of a question with random values - STACK puts the question variable in: {#sqvar1#} */
+function mountStackJs(stackJs, cfg, variant) {
+    if (variant !== undefined) cfg = Object.assign({}, cfg, { variant: variant });
     if (cfg.debug === true) ScratchQ.DEBUG = true;
     const names = cfg.inputs || { score: "ans1", state: "ans2" };
     let host = document.getElementById(cfg.hostId || "scratchq");
@@ -502,6 +559,7 @@ function mount(element, cfg, opts) {
     opts = opts || {};
     const host = elementOf(element);
     if (!host) return Promise.reject(new Error("ScratchQ.Question.mount: no element " + JSON.stringify(element)));
+    if (opts.variant !== undefined) cfg = Object.assign({}, cfg, { variant: opts.variant });
     return runQuestion(host, cfg, {
         state: opts.state || null,
         review: opts.readOnly === true,

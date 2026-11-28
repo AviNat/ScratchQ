@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>ScratchQ trace tests - parameters, variants, which branch, teacher mistakes</title>
+<script src="https://cdn.jsdelivr.net/npm/scratch-vm@4.8.115/dist/web/scratch-vm.min.js"></script>
+<script src="../scratchq.js"></script>
+<script src="../scratchq-editor.js"></script>
+<script src="../scratchq-question.js"></script>
+<script src="program-helper.js"></script>
+<style>body { font-family: sans-serif; margin: 10px; width: 1100px; }</style>
+</head>
+<body>
+<div id="q"></div>
+<pre id="out" dir="ltr">running…</pre>
+<script type="module">
+const out = { passed: 0, failed: 0, lines: [] };
+function ok(cond, name, detail) {
+    if (cond) out.passed += 1; else out.failed += 1;
+    out.lines.push((cond ? "ok   " : "FAIL ") + name + (cond || detail === undefined ? "" : "  -> " + JSON.stringify(detail).slice(0, 600)));
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const GF = ["event_whenflagclicked"];
+const P = ScratchQ.Params, T = ScratchQ.Trace;
+
+try {
+    /* n and m from set blocks; an if/else outside loops; an if inside a loop */
+    const program = prog({ vars: { n: 0, m: 0, s: 0 } }, [GF,
+        ["data_setvariableto", { VALUE: 5 }, { VARIABLE: "n" }],
+        ["data_setvariableto", { VALUE: 3 }, { VARIABLE: "m" }],
+        ["data_setvariableto", { VALUE: 0 }, { VARIABLE: "s" }],
+        ["control_repeat", { TIMES: { v: "n" }, SUBSTACK: [
+            ["control_if", { CONDITION: ["operator_gt", { OPERAND1: { v: "s" }, OPERAND2: 100 }], SUBSTACK: [["looks_say", { MESSAGE: "big" }]] }],
+            ["data_changevariableby", { VALUE: { v: "m" } }, { VARIABLE: "s" }]] }],
+        ["control_if_else", { CONDITION: ["operator_gt", { OPERAND1: { v: "s" }, OPERAND2: 10 }],
+            SUBSTACK: [["looks_say", { MESSAGE: "more than 10" }]], SUBSTACK2: [["looks_say", { MESSAGE: "at most 10" }]] }],
+        ["control_if", { CONDITION: ["operator_lt", { OPERAND1: { v: "n" }, OPERAND2: 0 }], SUBSTACK: [["looks_say", { MESSAGE: "negative" }]] }]]);
+
+    /* the structure */
+    const ifs = T.ifBlocks(program);
+    ok(ifs.length === 3 && ifs[0].inLoop && !ifs[1].inLoop && !ifs[2].inLoop && ifs[1].ifElse && !ifs[2].ifElse && ifs.map(b => b.number).join() === "1,2,3",
+        "if blocks: in reading order, the one in the loop marked", ifs);
+    const cands = P.candidates(program);
+    ok(cands.map(c => c.name + "=" + c.value).join() === "n=5,m=3,s=0", "parameter candidates: the set blocks with a number", cands);
+
+    /* the values */
+    ok(JSON.stringify(P.parseValues("3..9").values) === "[3,4,5,6,7,8,9]", "values 3..9");
+    ok(JSON.stringify(P.parseValues("2..10 step 4").values) === "[2,6,10]", "values 2..10 step 4");
+    ok(JSON.stringify(P.parseValues("-2..1").values) === "[-2,-1,0,1]", "values -2..1");
+    ok(JSON.stringify(P.parseValues("2, 4, 7").values) === "[2,4,7]", "values 2, 4, 7");
+    ok(!!P.parseValues("9..3").error && !!P.parseValues("a, b").error && !!P.parseValues("").error, "bad values: an error");
+
+    /* the variants */
+    const v1 = P.makeVariants([{ values: [3, 4, 5, 6, 7, 8, 9] }, { values: [1, 2, 3] }], 20, 7);
+    ok(v1.variants.length === 20 && v1.possible === 21 && new Set(v1.variants.map(JSON.stringify)).size === 20, "20 different variants of 21 possible", v1);
+    ok(JSON.stringify(P.makeVariants([{ values: [3, 4, 5, 6, 7, 8, 9] }, { values: [1, 2, 3] }], 20, 7)) === JSON.stringify(v1), "the same seed: the same variants");
+    ok(JSON.stringify(P.makeVariants([{ values: [3, 4, 5, 6, 7, 8, 9] }, { values: [1, 2, 3] }], 20, 8)) !== JSON.stringify(v1), "another seed: other variants");
+    const few = P.makeVariants([{ values: [1, 2, 3] }], 20, 1);
+    ok(few.variants.length === 3 && few.possible === 3, "fewer possible than asked: all of them", few);
+    const dealt = P.makeVariants([{ values: [1, 2, 3, 4], group: "A" }, { values: [1, 2, 3, 4], group: "A" }, { values: [1, 2, 3, 4], group: "A" }], 20, 3);
+    ok(dealt.possible === 24 && dealt.variants.every(v => new Set(v).size === 3), "a group: never the same value twice (4 values dealt to 3: 24)", dealt.variants.slice(0, 3));
+    const big = P.makeVariants([{ values: P.parseValues("1..200").values, group: "A" }, { values: P.parseValues("1..200").values, group: "A" }], 20, 3);
+    ok(big.variants.length === 20 && big.variants.every(v => v[0] !== v[1]) && new Set(big.variants.map(JSON.stringify)).size === 20 && big.possible === null,
+        "200 x 200 (too many to count): 20 sampled, all different", big);
+
+    /* the program with a variant's values */
+    const params = [{ block: cands[0].block, name: "n" }, { block: cands[1].block, name: "m" }];
+    const applied = P.apply(program, params, [4, 2]);
+    const r = await ScratchQ.Runner.run(applied, {});
+    ok(Number(r.vars.n) === 4 && Number(r.vars.m) === 2 && r.vars.s === 8 && program.blocks[cands[0].block].inputs.VALUE[1][1] === "5", "applied values run; the original is unchanged", r.vars);
+
+    /* which branch */
+    ok(r.branches[ifs[0].block] === "none" && r.branches[ifs[1].block] === "else" && r.branches[ifs[2].block] === "none", "branches recorded (s = 8: else)", r.branches);
+    const r2 = await ScratchQ.Runner.run(P.apply(program, params, [5, 3]), {});
+    ok(r2.branches[ifs[1].block] === "if", "s = 15: the if part", r2.branches);
+
+    /* a trace question with a variant */
+    const q = { kind: "trace", reference: program, params, variants: [[4, 2], [7, 3]], variant: 1,
+        trace: { items: [{ kind: "say" }, { kind: "var", name: "s" }, { kind: "branch", block: ifs[1].block }] } };
+    const exp = await ScratchQ.Checker.traceExpected(q);
+    ok(exp.variant === 1 && exp.items[1].value === 21 && exp.items[2].value === "if" && exp.items[0].value.join() === "more than 10", "trace: the expected answer of variant 2", exp);
+    const g = await ScratchQ.Checker.gradeTrace(q, { say: ["more than 10"], vars: { s: "21" }, branches: { [ifs[1].block]: "if" } }, "en");
+    ok(g.grade === 100, "trace: all correct", g);
+    const g2 = await ScratchQ.Checker.gradeTrace(q, { say: ["more than 10"], vars: { s: "21" }, branches: { [ifs[1].block]: "else" } }, "en");
+    ok(Math.round(g2.grade) === 67 && g2.marks.join() === "true,true,false", "trace: the branch wrong - 2 of 3", g2);
+    const g3 = await ScratchQ.Checker.gradeTrace(Object.assign({}, q, { variant: 99 }), { say: ["at most 10"], vars: { s: 8 }, branches: { [ifs[1].block]: "else" } }, "en");
+    ok(g3.grade === 100, "a variant out of range: the first", g3);
+
+    /* the teacher's mistakes (no random values) */
+    const qm = { kind: "trace", reference: program, trace: q.trace,
+        mistakes: [{ answers: { say: ["at most 10"], vars: { s: "12" }, branches: { [ifs[1].block]: "else" } }, message: { en: "The loop runs n times, not n - 1.", he: "הלולאה רצה n פעמים" }, score: 30 }] };
+    const gm = await ScratchQ.Checker.gradeTrace(qm, { say: ["at most 10"], vars: { s: " 12 " }, branches: { [ifs[1].block]: "else" } }, "he");
+    ok(gm.mistake === 0 && gm.grade === 30 && /^הלולאה רצה n פעמים\n/.test(gm.feedback), "a teacher mistake: its message first and its grade", gm);
+    /* (no variants: the program's own values, n = 5, m = 3 - s = 15, "more than 10", the if part) */
+    const gn = await ScratchQ.Checker.gradeTrace(qm, { say: ["more than 10"], vars: { s: "13" }, branches: { [ifs[1].block]: "if" } }, "en");
+    ok(gn.mistake === null && Math.round(gn.grade) === 67 && gn.feedback === "2 of 3 answers are correct.", "an answer that is not the mistake: graded as usual", gn);
+
+    /* partial credit for a sequence: the user's examples */
+    const sq = ScratchQ.Trace.sequenceScore, c5 = [1, 3, 5, 7, 9];
+    ok(sq(c5, ["1", "3", "5", "7", "9"]) === 1, "sequence: all correct");
+    ok(sq(c5, [1, 2, 5, 7, 8]) === 0.6, "sequence: two wrong values - 60%", sq(c5, [1, 2, 5, 7, 8]));
+    ok(sq(c5, [1, 3, 7, 9]) === 0.8, "sequence: one missing - the ones after it count - 80%", sq(c5, [1, 3, 7, 9]));
+    ok(sq(c5, [1, 3, 4, 5, 7, 9]) === 0.8, "sequence: one extra - 80%", sq(c5, [1, 3, 4, 5, 7, 9]));
+    ok(sq(c5, [1, 5, 3, 7, 9]) === 0.6, "sequence: a swap - 1, 7, 9 in place - 60%", sq(c5, [1, 5, 3, 7, 9]));
+    ok(Math.abs(sq(c5, [9, 7, 5, 3, 1]) - 0.2) < 1e-9, "sequence: reversed - only 5 in place - 20%", sq(c5, [9, 7, 5, 3, 1]));
+    ok(sq(c5, []) === 0 && sq([], []) === 1 && sq([], ["x"]) === 0, "sequence: empty answers");
+    ok(sq(["Hi", "Bye"], ["hi", "bye "]) === 1 && sq(["Hi", "Bye"], ["hi", "bye"], true) === 0, "sequence: case by the setting");
+    ok(sq([0, 1, 0, 1], [0, 1, 0]) === 0.75 && sq([0, 1, 0, 1], [1, 0, 1, 0]) === 0.5, "sequence: repeated values - one missing 75%, shifted by one 50%");
+
+    /* the grade: the say lines' partial credit, and weights */
+    const qs = { kind: "trace", reference: program, trace: { items: [{ kind: "say" }, { kind: "var", name: "s" }] } };
+    const gp = await ScratchQ.Checker.gradeTrace(qs, { say: ["more than 10", "extra"], vars: { s: "15" } }, "en");
+    ok(gp.grade === 50 && gp.scores.join() === "0,1" && gp.marks.join() === "false,true", "say: 1 line expected, an extra one costs it (1 - 1) / 1 = 0; s right - 50%", gp);
+    const qw = { kind: "trace", reference: program, trace: { items: [{ kind: "say", weight: 3 }, { kind: "var", name: "s" }] } };
+    const gw = await ScratchQ.Checker.gradeTrace(qw, { say: ["more than 10"], vars: { s: "14" } }, "en");
+    ok(gw.grade === 75 && gw.weights.join() === "3,1", "weights: say (weight 3) right, s (weight 1) wrong - 75%", gw);
+    const gz = await ScratchQ.Checker.gradeTrace({ kind: "trace", reference: program, trace: { items: [{ kind: "say", weight: 0 }, { kind: "var", name: "s", weight: 2 }] } },
+        { say: ["wrong"], vars: { s: "15" } }, "en");
+    ok(gz.grade === 100, "weight 0: the item is not graded", gz);
+
+    /* the student's form: the variant's values in the program, the radio buttons, the saved state */
+    let saved = null, score = null;
+    await ScratchQ.Question.mount("q", Object.assign({ language: "he", height: 300 }, q), { onChange: (s, sc) => { saved = s; score = sc; } });
+    await sleep(600);
+    const host = document.getElementById("q");
+    const ws = host.querySelector(".sq-editor").scratchqEditor.workspace;
+    const shadow = ws.getBlockById(cands[0].block).getInputTargetBlock("VALUE");
+    const shownN = shadow && (shadow.getFieldValue("NUM") || shadow.getFieldValue("TEXT"));
+    ok(String(shownN) === "7", "the student sees the variant's value in the set block (7, not the program's 5)", shownN);
+    const radios = host.querySelectorAll("input[type=radio]");
+    ok(radios.length === 2 && /איזה חלק של בלוק ה-if מספר 2/.test(host.textContent), "which branch: two choices, the if block numbered", host.textContent.slice(0, 300));
+    const ex = Array.from(host.querySelectorAll("span[dir=ltr]")).find(s => s.textContent === "[10] Hello");
+    ok(ex && getComputedStyle(ex).direction === "ltr", "the [10] Hello example is left to right in a Hebrew form");
+    radios[1].click();
+    radios[0].click();
+    ok(radios[0].checked && !radios[1].checked && radios[0].name === radios[1].name, "which branch: one choice at a time (a radio group)");
+    await sleep(700);
+    ok(saved && saved.answers.branches[ifs[1].block] === "if" && saved.variant === 1 && score > 0, "a choice is saved with the variant", saved);
+} catch (e) {
+    ok(false, "exception: " + (e && e.stack || e));
+}
+document.getElementById("out").textContent = out.lines.join("\n");
+window.__result = out;
+window.__done = true;
+</script>
+</body>
+</html>

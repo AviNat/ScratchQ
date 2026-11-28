@@ -246,8 +246,115 @@ try {
     ok(!$("traceSection").hidden && /says:\n\s+The sum is 6/.test($("traceExpected").textContent), "trace: the correct answer shown", $("traceExpected").textContent);
     const cfg = B.questionConfig();
     ok(cfg.kind === "trace" && cfg.tests.length === 1 && !cfg.palette, "trace: the code's configuration", Object.keys(cfg));
+    ok(/^sqmodel: "sq1:/.test(await B.questionVariables()), "a file made before part numbers keeps the variable sqmodel", await B.questionVariables());
     document.querySelector("input[name=kind][value=program]").click();
     await sleep(300);
+
+    /* ---------- a trace question with random values, which branch, the teacher's mistakes ---------- */
+    const traceProg = prog({ vars: { n: 0, s: 0 } }, [["event_whenflagclicked"],
+        ["data_setvariableto", { VALUE: 4 }, { VARIABLE: "n" }],
+        ["data_setvariableto", { VALUE: 0 }, { VARIABLE: "s" }],
+        ["control_repeat", { TIMES: { v: "n" }, SUBSTACK: [
+            ["control_if", { CONDITION: ["operator_gt", { OPERAND1: { v: "s" }, OPERAND2: 100 }], SUBSTACK: [["looks_say", { MESSAGE: "big" }]] }],
+            ["data_changevariableby", { VALUE: 3 }, { VARIABLE: "s" }]] }],
+        ["control_if_else", { CONDITION: ["operator_gt", { OPERAND1: { v: "s" }, OPERAND2: 15 }],
+            SUBSTACK: [["looks_say", { MESSAGE: "more" }]], SUBSTACK2: [["looks_say", { MESSAGE: "less" }]] }]]);
+    B.loadState({ tool: "scratchq-builder", kind: "trace", reference: traceProg, trace: { items: [{ kind: "say" }, { kind: "var", name: "s" }] } }, "trace.scratchq", null);
+    await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).length > 5);
+    await B.runChecks();
+    ok(B.state.question.part === "1" && /^sqmodel1: "sq1:/.test(await B.questionVariables()), "a new question: part 1, sqmodel1");
+    /* only what a trace question uses: no starting values, seed, palette, starting program */
+    B.state.tests[0].vars = { n: "9" };
+    const tcfg = B.checkConfig();
+    ok($("traceRunBox").hidden && !$("traceTestBox").querySelector("input") && JSON.stringify(tcfg.tests[0].vars) === "{}",
+        "trace without ask: no data fields, a variable's starting value is not used", tcfg.tests[0]);
+    ok($("paletteSection").hidden && $("initialSection").hidden && $("mistakesSection").hidden && $("testsSection").hidden && $("observeSection").hidden &&
+        $("exportInit").hidden && $("importTargetInit").disabled, "trace: the palette, starting program, program mistakes, tests and what is checked are hidden");
+    /* which branch: the if outside the loop is offered, the one inside is not */
+    const branchBoxes = $("traceItemsBox").querySelectorAll("input[data-item=branch]");
+    ok(branchBoxes.length === 1 && /inside a loop/.test($("traceItemsBox").textContent), "which branch: only the if outside the loop", $("traceItemsBox").textContent);
+    branchBoxes[0].click();
+    await B.runChecks();
+    ok(/if block no\. 2: the "else" part/.test($("traceExpected").textContent) && /s = 12/.test($("traceExpected").textContent),
+        "which branch: the correct answer (n = 4: s = 12, not more than 15 - the else part)", $("traceExpected").textContent);
+    /* the weights: a field beside each item, enabled when the item is ticked; 1 is not stored */
+    const bw = branchBoxes[0].parentNode.querySelector("input.weight");
+    ok(bw && !bw.disabled && bw.value === "1", "weights: the branch's weight field, 1 by default");
+    /* an answer typed in the attempt stays when only a weight changes, and is graded again */
+    await until(() => $("attemptHost").querySelector("textarea, input[type=text]"), 8000);
+    const typed = $("attemptHost").querySelector("textarea, input[type=text]");
+    typed.value = "wrong";
+    typed.dispatchEvent(new Event("input", { bubbles: true }));
+    await until(() => /Grade/.test($("attemptResult").textContent), 6000);
+    const resultBefore = $("attemptResult").textContent;
+    bw.value = "3";
+    bw.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(300);
+    await until(() => $("attemptHost").querySelector("textarea, input[type=text]"), 8000);
+    await until(() => /Grade/.test($("attemptResult").textContent), 6000);
+    const kept = $("attemptHost").querySelector("textarea, input[type=text]");
+    ok(kept && kept.value === "wrong" && /Grade/.test($("attemptResult").textContent), "weights: the attempt's typed answer stays, graded again", { before: resultBefore, after: $("attemptResult").textContent });
+    const bItem = B.state.trace.items.find(it => it.kind === "branch");
+    ok(bItem && bItem.weight === 3 && B.questionConfig().trace.items.find(it => it.kind === "branch").weight === 3, "weights: kept in the state and in the code", B.state.trace.items);
+    bw.value = "1";
+    bw.dispatchEvent(new Event("change", { bubbles: true }));
+    ok(B.state.trace.items.find(it => it.kind === "branch").weight === undefined, "weights: back to 1 - not stored");
+    /* the random values: n from 3..9 - 7 variants (fewer than 20: all of them) */
+    const nBox = $("paramsBox").querySelector("input[data-pon]");
+    ok(!$("paramsSection").hidden && nBox && $("paramsBox").querySelectorAll("input[data-pon]").length === 2, "random values: the two set blocks offered");
+    nBox.click();
+    const nValues = $("paramsBox").querySelector("input[data-pvalues]:not([disabled])");
+    nValues.value = "3..9";
+    nValues.dispatchEvent(new Event("change", { bubbles: true }));
+    await B.runChecks();
+    ok(B.state.variants.length === 7 && $("variantsTable").querySelectorAll("tr").length === 8 && /all the possible ones/.test($("variantsStatus").textContent),
+        "random values: 7 variants, each with its answer", $("variantsStatus").textContent);
+    const qc = B.questionConfig();
+    ok(qc.params.length === 1 && qc.variants.length === 7 && qc.variant === undefined, "the code carries the parameters and the variants (not a variant)", { params: qc.params, variant: qc.variant });
+    const traceCode = B.stackCode(qc);
+    ok(/mountStackJs\(stack_js,\{.*\},\{#sqvar1#\}\);\[\[\/script\]\]/.test(traceCode), "the STACK code passes the variant: {#sqvar1#}");
+    const qv = await B.questionVariables();
+    ok(/^sqvar1: rand\(7\);\nsqmodels1: \["sq1:[^"]+"(, "sq1:[^"]+"){6}\];\nsqmodel1: sqmodels1\[sqvar1 \+ 1\];$/.test(qv), "the question variables: the variant and a model answer for each", qv.slice(0, 200));
+    /* each variant's model answer is the correct answer of that variant */
+    const models = qv.split("\n")[1].match(/"sq1:[^"]+"/g).map(s => ScratchQ.parseState(s.slice(1, -1)));
+    let allRight = true;
+    for (let i = 0; i < models.length; i += 1) {
+        const g = await ScratchQ.Checker.gradeTrace(Object.assign({}, qc, { variant: i }), models[i].answers, "en");
+        if (g.grade !== 100 || models[i].variant !== i) allRight = false;
+    }
+    ok(allRight, "every variant's model answer gets 100% on its own variant");
+    const wrongVariant = await ScratchQ.Checker.gradeTrace(Object.assign({}, qc, { variant: 0 }), models.find((m, i) => i > 0 && JSON.stringify(m.answers) !== JSON.stringify(models[0].answers)).answers, "en");
+    ok(wrongVariant.grade < 100, "another variant's answer is not correct");
+    /* the mistakes are not used with random values */
+    B.showTab("didactics");
+    ok($("addTraceMistake").disabled && /random values/.test($("traceMistakesBox").textContent), "mistakes: off with random values");
+    /* the code opens again with its parameters and variants */
+    const variantsBefore = JSON.stringify(B.state.variants);
+    B.openText(traceCode, "", null);
+    await until(() => B.editors.ref && B.editors.ref.workspace.getAllBlocks(false).length > 5);
+    ok(B.state.params.length === 1 && B.state.params[0].values === "3..9" && JSON.stringify(B.state.variants) === variantsBefore, "opening the code: the parameters and the same variants");
+    /* without random values: a typed mistake */
+    B.showTab("checker");
+    $("paramsBox").querySelector("input[data-pon]:checked").click();
+    await B.runChecks();
+    ok(!B.state.params.length && $("shownVariantField").hidden, "random values off");
+    B.showTab("didactics");
+    $("addTraceMistake").click();
+    ok(await until(() => $("traceMistakesBox").querySelector("input[data-tm=var]"), 3000), "a mistake: its fields, from the correct answer");
+    await B.runChecks();
+    ok(/correct answer - not a mistake/.test($("traceMistakeStatus0").textContent), "a mistake equal to the correct answer: flagged", $("traceMistakeStatus0").textContent);
+    const sField = $("traceMistakesBox").querySelector("input[data-tm=var]");
+    sField.value = "15";
+    sField.dispatchEvent(new Event("input", { bubbles: true }));
+    const heField = $("traceMistakesBox").querySelector("input[data-tm=he]");
+    heField.value = "הלולאה רצה פעם אחת יותר מדי";
+    heField.dispatchEvent(new Event("input", { bubbles: true }));
+    await B.runChecks();
+    ok(/2 of 3 fields are correct/.test($("traceMistakeStatus0").textContent), "the mistake: 2 of 3 fields", $("traceMistakeStatus0").textContent);
+    const mq = B.questionConfig();
+    const gtm = await ScratchQ.Checker.gradeTrace(mq, Object.assign({}, B.state.traceMistakes[0].answers, { vars: { s: "15" } }), "he");
+    ok(mq.mistakes.length === 1 && gtm.mistake === 0 && /^הלולאה רצה פעם אחת יותר מדי/.test(gtm.feedback), "a student's answer equal to the mistake: its message", gtm.feedback);
+    B.showTab("checker");
 } catch (e) {
     ok(false, "exception: " + (e && e.stack || e));
 }

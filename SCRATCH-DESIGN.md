@@ -391,7 +391,7 @@ How to run the tests: `node tests/run-page.mjs tests/runner-tests.html`. `SHOT=f
   - the 5.7 MB VM load time;
   - the frame height.
 - **A slimmer VM bundle.**
-- **Trace questions:** the parameters / random variants (§7) and the built-in mutants (§6.3).
+- **Trace questions:** the built-in mutants (§6.3) - not wanted for now (§12.5); random values done (§12.5).
 - **Parsons** (K2) and **structural rules** (§6.2).
 - **The builder's interface language:** English only, like the math playground.
 - **Hosting:** done - the library is on GitHub Pages, `https://avinat.github.io/ScratchQ/` (repository AviNat/ScratchQ).
@@ -403,6 +403,88 @@ How to run the tests: `node tests/run-page.mjs tests/runner-tests.html`. `SHOT=f
 - `ScratchQ.Drawing.svg(segments, { grid, axes, width, fit })` draws an SVG as text. The view fits the drawing and (0, 0), on whole grid squares. `fit` puts two pictures side by side on the same scale.
 - **The builder (tab 2):** "The reference's drawing" for a chosen test, with Grid and X/Y axes options, **Copy SVG** and **Download .svg** for the question's text. The tests and the attempt show small pictures.
 - **The question:** `drawing: { answering, review, grid, axes }`, only when the drawing is checked. *While answering*: the student's drawing under the editor, drawn again after each change (off by default, the earlier decision 9). *In the review*: the student's drawing and, when the review shows the reference, the correct one beside it on the same scale (on by default, for grading by hand). The picture is of the first test that is not hidden.
+
+## 12.5 Trace questions: the design decisions (user, 2026-11-27; implemented: lib 0.4.0, builder 0.2.0)
+
+The open points of §7 (random values), §6.3 (built-in mutants) and §11.2 items 4–5, asked as 14 questions.
+
+**As built:** `scratchq.js` - `Params` (candidates, parseValues, makeVariants, apply, withVariant), `Trace` (ifBlocks,
+blockOrder, branch texts), the Runner records `branches`, `gradeTrace` matches the teacher's mistakes.
+`scratchq-question.js` - the variant applied before display and grading, radio buttons for "which branch",
+`mountStackJs(stack_js, cfg, {#sqvar1#})`, the variant in the saved state. Builder - tab 2 "Random values" (a row per
+set block, values, group, variants count, "Other variants", each variant's answer, the variant shown), "which branch"
+items, tab 3 typed mistakes, tab 5 the part number, the variant to try, the question variables
+(`sqvar1: rand(K); sqmodels1: [...]; sqmodel1: sqmodels1[sqvar1 + 1];`). Tests: `tests/trace-tests.html` (25), the
+builder self-test (66). **To verify on a real STACK server:** `{#sqvar1#}` inside the `[[script]]` of the `[[iframe]]`,
+and the question variables.
+
+**1. Where the random values come from: the builder (decided).** The teacher gives the parameters and their ranges in
+the builder; the library picks the values. The builder can then show variants and check them for collisions.
+- **One seed from STACK.** The question variables hold one random number, e.g. `sqseed: rand(99999);`, and the
+  question code passes it into the frame (`{#sqseed#}` inside the `[[iframe]]`). The same seed in the attempt, its
+  review and a regrade, and for Moodle's deployed variants.
+- **The variable's name:** `sqseed` by default, set in the builder. Reason: several Scratch questions in one STACK
+  question (one frame each).
+- **Several parts: a seed variable each** (decided): `sqseed1`, `sqseed2`, … in the question variables, `{#sqseed1#}`
+  in the first part's code, `{#sqseed2#}` in the second's. No mixing of one seed between parts.
+- **The model answer must work** (user): Moodle's "Fill in correct responses" is a feature to keep, and **the builder is
+  the only interface** - the teacher writes no STACK syntax. The builder generates the question variables, copied
+  with `sqmodel` as now.
+- **Decided (20 variants by default, several parts kept):** STACK cannot compute the correct answer of random values (Maxima does not run Scratch), so
+  the builder prepares **K variants** (e.g. 20): it picks the values (ranges, dealt value lists - 3 + 4), runs the
+  program on each, and writes the correct answer of each. The code in the frame carries the table of the K value
+  sets; the question variables (generated, copied as one block):
+  `sqvar1: rand(20);  sqmodel1: ["sq1:…", "sq1:…", …][sqvar1+1];`
+  The frame gets `{#sqvar1#}` (the variant's number) and takes that row. Then the model answer always fits the
+  student's values, a later library change cannot make them differ (nothing is recomputed in the frame), and the
+  builder can show every variant with its answer. This replaces the seed of the first decision: STACK passes the
+  variant number. Several parts: `sqvar1` / `sqmodel1`, `sqvar2` / `sqmodel2`, … Size: a trace model answer is a few
+  hundred characters, so 20-50 variants are fine.
+
+**2. What can be random: numbers in `set` blocks only (decided, "2a").** The teacher marks the number in a
+`set [n] to (…)` block as a parameter: a range and a step. The student sees the program with the picked number in
+that block (`set n to (7)`) and follows `n` through the program; nothing shows that it was random. Not now: a random
+number in any block (2c), random lists (2b - how a random list would be used is not clear yet), random texts.
+- The question's text cannot show the values (they are picked in the frame, STACK does not know them).
+
+**3 + 4. Parameters that must differ (decided).** A group of parameters takes its values from **one list of values**
+given by the teacher, **shuffled with the question's seed**: each parameter of the group gets the next value, so no
+two of them are equal (like dealing cards). A parameter outside a group has its own range.
+- Collisions with the teacher's mistakes do not arise: mistakes exist only without random values (8).
+
+**5 + 6 + 7. Built-in mutants: not now (decided).** Only the mistakes the teacher defines (8).
+
+**8. The teacher's mistakes (decided): typed wrong answers, only in a question without random values.** Building a
+wrong program is too much work for the teacher. As in chemistry: the wrong answer, a message (he / ar / en), a score.
+The builder hides the mistakes when the question has parameters. A mistake matches when every answer field equals
+the mistake's.
+
+**9. The answer form: add "which branch" (decided).** Besides what the sprite says, a variable and a list.
+- The teacher picks an `if / else` (or `if`) block **outside any loop** (decided; the builder does not offer one
+  inside a loop). The student answers "the if part" / "the else part" (/ "neither" for an `if` without else).
+
+**10. Scoring: weights and partial credit (changed 2026-11-28; first "no weights").**
+- Each answer item (what the sprite says, a variable, a list, which branch) has a weight, 1 by default, set in the
+  builder beside the item (`trace.items[i].weight`; 1 is not stored, 0 = not graded). The grade is the weighted mean
+  of the items' credits.
+- A sequence of values (the say lines, a list) gets partial credit: (n − edits) / n, where n is the number of expected
+  values and an edit is a wrong, missing or extra value (an edit distance). A missing value does not make the ones
+  after it wrong. Misordered values: a swap costs two edits (the values in place still count), and reversed values
+  keep only what stays in place. (A first version gave 0 to any misordering; the user changed it 2026-11-28: a swap
+  must keep the credit of the values in place.) Expected 1,3,5,7,9: 1,2,5,7,8 → 60%; 1,3,7,9 → 80%;
+  1,3,4,5,7,9 → 80%; 1,5,3,7,9 → 60%; 9,7,5,3,1 → 20%.
+- A variable and a branch are right or wrong. A teacher's mistake still matches only an exact answer, and its score
+  replaces the grade.
+- In the review a field is green (right), yellow (partly right) or red. Code: `sequenceScore`, `traceItemScore`
+  in scratchq.js (lib 0.5.0); `gradeTrace` also returns `scores` and `weights`.
+
+**11. What the sprite says: as now (decided).** One line per say, `[10] Hello` for repeats, in order.
+
+**12. The display: the read-only block editor (decided)**, as now.
+
+**13. Trace table in the review: not now (decided).**
+
+**14. Answers to `ask`: not random for now (decided).** Fixed in the builder, as now.
 
 ## 13. Open questions for the user
 1. ~~Hebrew UI~~ → decided (§0.4). ~~Grades~~ → 7–9. ~~Container~~ → STACK.

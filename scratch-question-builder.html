@@ -147,7 +147,7 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
 </section>
 <section>
   <h2>Preview - what the student sees</h2>
-  <p class="hint">The starting program (tab 3) with its locks and this palette. It is not graded here (tab 2 grades a student attempt).</p>
+  <p class="hint" id="previewHint">The starting program (tab 3) with its locks and this palette. It is not graded here (tab 2 grades a student attempt).</p>
   <div id="previewHost"></div>
 </section>
 </main>
@@ -194,10 +194,27 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <h2>What the student answers</h2>
   <p class="hint">One answer field for each item. The correct answer is what the program gives - shown below.</p>
   <div id="traceItemsBox"></div>
-  <h3>The data of the run</h3>
-  <div id="traceTestBox"></div>
-  <h3>The correct answer</h3>
+  <div id="traceRunBox">
+    <h3>The answers to "ask"</h3>
+    <p class="hint">What the user types when the program asks. The student does not see these answers: write them in the question's text too (e.g. "the user types 7").</p>
+    <div id="traceTestBox"></div>
+  </div>
+  <h3>The correct answer <span id="traceShownVariant" class="hint"></span></h3>
   <div class="expected" id="traceExpected"></div>
+</section>
+
+<section id="paramsSection" hidden>
+  <h2>Random values</h2>
+  <p class="hint">Each student gets other numbers in the program. Tick a "set" block and write its values: a range <code>3..9</code>, a range with a step <code>2..20 step 2</code>, or numbers <code>4, 7, 12</code>.
+    Parameters with the same <b>group</b> letter never get the same value (each takes another one of the values, as cards dealt). The student sees the numbers in the blocks; nothing shows they are random.</p>
+  <div id="paramsBox"></div>
+  <div class="row">
+    <label class="field">Variants<input type="number" id="variantCount" min="1" max="100" step="1"></label>
+    <button type="button" class="small" id="newVariants" title="Pick other values for the variants">🎲 Other variants</button>
+    <label class="field" id="shownVariantField">Show variant (the correct answer above and the attempt below)<select id="shownVariant"></select></label>
+  </div>
+  <div class="status" id="variantsStatus"></div>
+  <table class="result-table" id="variantsTable"></table>
 </section>
 
 <section id="testsSection">
@@ -234,8 +251,9 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <div class="cards" id="mistakesBox"></div>
 </section>
 <section id="traceDidactics" hidden>
-  <h2>Mistakes in a trace question</h2>
-  <p class="hint">Planned: the built-in misconceptions (a loop one time too few or too many, lists counted from 0, …) and wrong answers typed by the teacher. Not in this version.</p>
+  <h2>Common mistakes <button type="button" class="small" id="addTraceMistake">+ Add a mistake</button></h2>
+  <p class="hint" id="traceMistakesHint">A wrong answer a student may give, typed as the student would. When a student's answer equals it in every field, the student gets your message first (and the grade you set, if any).</p>
+  <div class="cards" id="traceMistakesBox"></div>
 </section>
 </main>
 
@@ -257,7 +275,7 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <h2>Scratch files (.sb3)</h2>
   <div class="row">
     <label class="field">Import a program made in Scratch into
-      <select id="importTarget"><option value="reference">the reference program</option><option value="initial">the starting program</option></select>
+      <select id="importTarget"><option value="reference">the reference program</option><option value="initial" id="importTargetInit">the starting program</option></select>
     </label>
     <button type="button" id="importSb3">Import .sb3…</button>
     <input type="file" id="sb3Input" accept=".sb3" hidden>
@@ -285,6 +303,7 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
     <label class="field">Question name<input type="text" id="questionId" style="width:260px"></label>
     <label class="field q-stack">Score input<input type="text" id="inputScore" style="width:90px"></label>
     <label class="field q-stack">State input<input type="text" id="inputState" style="width:90px"></label>
+    <label class="field q-stack" title="Two Scratch questions in one STACK question: number them 1 and 2 (and give the second other inputs, e.g. ans3 and ans4)">Part number (STACK variables sqmodel1, sqvar1, …)<input type="text" id="questionPart" style="width:60px"></label>
   </div>
   <div class="row">
     <span>The review shows:</span>
@@ -306,6 +325,7 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
   <div class="row">
     <button type="button" class="primary" id="trySubmit">Submit</button>
     <button type="button" id="tryAgain" hidden>Try again</button>
+    <label class="field" id="tryVariantField" hidden>The student's variant<select id="tryVariant"></select></label>
   </div>
   <textarea class="code" id="tryState" readonly style="height:70px" placeholder="The saved state (what the state input gets)"></textarea>
 </section>
@@ -325,8 +345,8 @@ table.summary td:first-child{font-weight:bold;white-space:nowrap;width:1%;backgr
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-const BUILDER_VERSION = "0.1.0";
-const CODE_VERSION = "2026-11-27.1";
+const BUILDER_VERSION = "0.3.0";
+const CODE_VERSION = "2026-11-27.2";
 const TOOL = "scratchq-builder";
 const QUESTION_TOOL = "scratchq-question";
 const FILE_EXT = ".scratchq";
@@ -352,7 +372,10 @@ function defaultState() {
         trace: { items: [{ kind: "say" }] },
         drawing: { answering: false, review: true, grid: true, axes: true, size: 256 },
         mistakes: [],
-        question: { target: "stack", questionId: "scratch1", inputs: { score: "ans1", state: "ans2" },
+        /* trace: random values in set blocks - params [{ block, values (text), group }], the variants made from them */
+        params: [], variantCount: 20, variantSeed: 1, variants: [],
+        traceMistakes: [],                               // trace: [{ answers, message, score }] (no random values only)
+        question: { target: "stack", questionId: "scratch1", part: "1", inputs: { score: "ans1", state: "ans2" },
             review: { grade: true, feedback: true, reference: true }, libraryUrl: DEFAULT_LIBRARY }
     };
 }
@@ -377,14 +400,33 @@ function renderFileState() {
 }
 window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
-/* the question configuration the library reads (also the checker's) */
-function checkConfig() {
-    return {
+/* the question configuration the library reads (also the checker's); variant: the one shown in the builder */
+let shownVariant = 0;
+function checkConfig(variant) {
+    const cfg = {
         kind: state.kind, language: state.language, height: state.height,
         reference: state.reference, initial: state.initial, locks: state.locks, palette: state.palette,
         tests: state.tests.map(t => testForRun(t)), observe: state.observe, trace: state.trace, drawing: state.drawing,
         mistakes: state.mistakes.map(m => ({ program: m.program, message: m.message, score: m.score }))
     };
+    if (state.kind === "trace") {
+        /* one run, with only the answers to "ask" (what the student cannot see is not used) */
+        const t0 = state.tests[0] || {};
+        cfg.tests = [{ name: "1", answers: (t0.answers || []).slice(), seed: 1, hidden: false, vars: {}, lists: {} }];
+        if (randomValues()) {
+            cfg.params = state.params.map(p => ({ block: p.block, name: paramName(p) }));
+            cfg.variants = state.variants;
+            cfg.variant = variant === undefined ? shownVariant : variant;
+            cfg.mistakes = [];
+        } else cfg.mistakes = state.traceMistakes.map(m => ({ answers: m.answers, message: m.message, score: m.score }));
+    }
+    return cfg;
+}
+/* a trace question with random values (and its variants made) */
+function randomValues() { return state.kind === "trace" && state.params.length > 0 && state.variants.length > 0; }
+function paramName(p) {
+    const c = ScratchQ.Params.candidates(state.reference).find(x => x.block === p.block);
+    return c ? c.name : "?";
 }
 /* a test as the runner takes it: empty values left out (the program's own) */
 function testForRun(t) {
@@ -539,10 +581,17 @@ function renderKind() {
     $("observeSection").hidden = trace;
     $("testsSection").hidden = trace;
     $("traceSection").hidden = !trace;
+    $("paramsSection").hidden = !trace;
     $("initialSection").hidden = trace;
     $("mistakesSection").hidden = trace;
     $("traceDidactics").hidden = !trace;
     $("attemptReset").hidden = trace;
+    /* a trace question has no palette and no starting program */
+    $("previewHint").textContent = trace ? "The program and the answer fields, as the student sees them (not graded here: tab 2 grades a student attempt)."
+        : "The starting program (tab 3) with its locks and this palette. It is not graded here (tab 2 grades a student attempt).";
+    $("importTargetInit").hidden = $("importTargetInit").disabled = trace;
+    if (trace) $("importTarget").value = "reference";
+    $("exportInit").hidden = trace;
     $("refTitle").textContent = trace ? "The program the student reads" : "The reference program";
     $("refHint").textContent = trace
         ? "The program shown to the student (read-only). What it gives is the correct answer. Put the data in the program (set blocks), or give the answers to \"ask\" below."
@@ -581,8 +630,15 @@ function referenceChanged(program) {
     state.observe.lists = state.observe.lists.filter(n => ln.indexOf(n) >= 0);
     /* the first "pen down" in the reference: the drawing is checked (the teacher may untick it) */
     if (state.observe.pen === undefined && usesPen(program)) state.observe.pen = true;
-    state.trace.items = state.trace.items.filter(it => it.kind === "say" || (it.kind === "var" ? vn : ln).indexOf(it.name) >= 0);
+    /* the answer items, parameters and mistakes' answers of blocks that are gone (or an if now inside a loop) */
+    const ifsOk = new Set(ScratchQ.Trace.ifBlocks(program).filter(b => !b.inLoop).map(b => b.block));
+    state.trace.items = state.trace.items.filter(it => it.kind === "say" || (it.kind === "branch" ? ifsOk.has(it.block) : (it.kind === "var" ? vn : ln).indexOf(it.name) >= 0));
     if (!state.trace.items.length) state.trace.items = [{ kind: "say" }];
+    const cands = new Set(ScratchQ.Params.candidates(program).map(c => c.block));
+    const before = state.params.length;
+    state.params = state.params.filter(p => cands.has(p.block));
+    if (state.params.length !== before) makeVariants();
+    renderParams();
     /* the tests' values of variables / lists that no longer exist */
     state.tests.forEach(t => {
         if (t.vars) Object.keys(t.vars).forEach(n => { if (vn.indexOf(n) < 0) delete t.vars[n]; });
@@ -591,6 +647,7 @@ function referenceChanged(program) {
     renderObserve();
     renderTests();
     renderTraceSection();
+    renderTraceMistakes();
     changed();
 }
 
@@ -799,38 +856,249 @@ $("drawDownload").onclick = () => {
 /* trace: the items, the one run's data, the correct answer */
 function renderTraceSection() {
     const items = state.trace.items;
-    const has = (k, n) => items.some(it => it.kind === k && (k === "say" || it.name === n));
-    let html = "<label class=\"check\"><input type=\"checkbox\" data-item=\"say\"" + (has("say") ? " checked" : "") + "> <span>What the sprite says (all the lines, in order)</span></label>";
+    const find = (k, n) => items.find(it => it.kind === k && (k === "say" || (k === "branch" ? it.block === n : it.name === n)));
+    const has = (k, n) => !!find(k, n);
+    /* the weight of an item in the grade (default 1), beside its checkbox */
+    const weight = (k, n) => {
+        const it = find(k, n);
+        const w = it && typeof it.weight === "number" ? it.weight : 1;
+        return " <span class=\"hint\" style=\"margin:0 6px\">weight</span><input type=\"number\" class=\"weight\" min=\"0\" step=\"1\" style=\"width:56px\" value=\"" + w + "\"" + (it ? "" : " disabled") + " title=\"The item's weight in the grade (0 = not graded)\">";
+    };
+    let html = "<label class=\"check\"><input type=\"checkbox\" data-item=\"say\"" + (has("say") ? " checked" : "") + "> <span>What the sprite says (all the lines, in order) - partial credit</span>" + weight("say") + "</label>";
     varNames(state.reference).forEach(n => {
-        html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"var\" data-name=\"" + esc(n) + "\"" + (has("var", n) ? " checked" : "") + "> <span>The final value of <b>" + esc(n) + "</b></span></label>";
+        html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"var\" data-name=\"" + esc(n) + "\"" + (has("var", n) ? " checked" : "") + "> <span>The final value of <b>" + esc(n) + "</b></span>" + weight("var", n) + "</label>";
     });
     listNames(state.reference).forEach(n => {
-        html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"list\" data-name=\"" + esc(n) + "\"" + (has("list", n) ? " checked" : "") + "> <span>The final contents of the list <b>" + esc(n) + "</b></span></label>";
+        html += "<label class=\"check\"><input type=\"checkbox\" data-item=\"list\" data-name=\"" + esc(n) + "\"" + (has("list", n) ? " checked" : "") + "> <span>The final contents of the list <b>" + esc(n) + "</b> - partial credit</span>" + weight("list", n) + "</label>";
     });
+    /* which part of an if block runs: only an if outside loops (inside a loop it runs several times) */
+    const ifs = ScratchQ.Trace.ifBlocks(state.reference);
+    ifs.forEach(b => {
+        const on = items.some(it => it.kind === "branch" && it.block === b.block);
+        const what = "Which part of if block no. " + b.number + (ifs.length === 1 ? "" : " (counting from the top)") + " runs" + (b.ifElse ? " - \"if\" or \"else\"" : " - \"if\" or neither");
+        html += b.inLoop
+            ? "<label class=\"check\" title=\"An if inside a loop runs several times\"><input type=\"checkbox\" disabled> <span class=\"hint\" style=\"margin:0\">" + esc(what) + " - not offered: it is inside a loop</span></label>"
+            : "<label class=\"check\"><input type=\"checkbox\" data-item=\"branch\" data-block=\"" + esc(b.block) + "\"" + (on ? " checked" : "") + "> <span>" + esc(what) + "</span>" + weight("branch", b.block) + "</label>";
+    });
+    html += "<p class=\"hint\">The grade is the weighted mean of the items. A list of values (what the sprite says, a list) gets partial credit: " +
+        "each wrong, missing or extra value takes off one share (expected 1,3,5,7,9: 1,2,5,7,8 gets 60%, 1,3,7,9 and 1,3,4,5,7,9 get 80%). " +
+        "A swap costs two shares (1,5,3,7,9 gets 60%); reversed values keep only what stays in place (9,7,5,3,1 gets 20%).</p>";
     $("traceItemsBox").innerHTML = html;
-    $("traceTestBox").innerHTML = state.tests[0] ? testInputsHtml(state.tests[0], 0) : "";
+    /* the one run's data: only the answers to "ask" - starting values of variables and lists, and a random seed, are
+       not seen by the student (the data goes in set blocks, which can be random) */
+    const ask = usesAsk(state.reference);
+    $("traceRunBox").hidden = !ask;
+    const t = state.tests[0] || {};
+    $("traceTestBox").innerHTML = ask ? "<textarea data-f=\"answers\" data-i=\"0\" style=\"width:min(420px,100%);min-height:54px;font:13px Consolas,monospace;direction:ltr\" placeholder=\"one answer per line\">" +
+        esc((t.answers || []).join("\n")) + "</textarea>" : "";
 }
-$("traceItemsBox").addEventListener("change", () => {
-    state.trace.items = Array.from($("traceItemsBox").querySelectorAll("input[data-item]:checked"))
-        .map(i => i.dataset.item === "say" ? { kind: "say" } : { kind: i.dataset.item, name: i.dataset.name });
+$("traceItemsBox").addEventListener("change", e => {
+    state.trace.items = Array.from($("traceItemsBox").querySelectorAll("input[data-item]:checked")).map(i => {
+        const it = i.dataset.item === "say" ? { kind: "say" } : i.dataset.item === "branch" ? { kind: "branch", block: i.dataset.block } : { kind: i.dataset.item, name: i.dataset.name };
+        const w = Number(i.parentNode.querySelector("input.weight").value);
+        if (w >= 0 && isFinite(w) && w !== 1) it.weight = w;          // 1 is the default: not stored
+        return it;
+    });
+    $("traceItemsBox").querySelectorAll("input[data-item]").forEach(i => { i.parentNode.querySelector("input.weight").disabled = !i.checked; });
+    if (e.target.classList.contains("weight")) { renderAttempt(false); changed(); return; }   // the typed answers stay
+    renderTraceMistakes();
+    renderAttempt(true);
     changed();
 });
+
+/* trace: the random values - a row for each set block with a number; the variants made from them */
+function renderParams() {
+    const cands = ScratchQ.Params.candidates(state.reference);
+    const box = $("paramsBox");
+    if (!cands.length) {
+        box.innerHTML = "<p class=\"hint\">The program has no \"set [variable] to (number)\" block. Put the data in set blocks at the start of the program to make it random.</p>";
+    } else {
+        let html = "<table class=\"result-table\" style=\"width:auto\"><tr><th>Random</th><th>The block</th><th>Values</th><th>Group</th><th></th></tr>";
+        cands.forEach(c => {
+            const p = state.params.find(x => x.block === c.block);
+            const parsed = p ? ScratchQ.Params.parseValues(p.values) : null;
+            html += "<tr><td><input type=\"checkbox\" data-pon=\"" + esc(c.block) + "\"" + (p ? " checked" : "") + "></td>" +
+                "<td class=\"mono\">set " + esc(c.name) + " to " + esc(c.value) + "</td>" +
+                "<td><input type=\"text\" data-pvalues=\"" + esc(c.block) + "\" style=\"width:180px;direction:ltr\" value=\"" + esc(p ? p.values : "") + "\"" + (p ? "" : " disabled") + " placeholder=\"3..9\"></td>" +
+                "<td><input type=\"text\" data-pgroup=\"" + esc(c.block) + "\" style=\"width:50px;direction:ltr\" maxlength=\"3\" value=\"" + esc(p ? p.group || "" : "") + "\"" + (p ? "" : " disabled") + "></td>" +
+                "<td class=\"" + (parsed && parsed.error ? "fail\">⚠ " + esc(parsed.error) : "hint\" style=\"margin:0\">" + (parsed ? esc(parsed.values.length + (parsed.values.length === 1 ? " value" : " values")) : "")) + "</td></tr>";
+        });
+        box.innerHTML = html + "</table>";
+    }
+    $("variantCount").value = state.variantCount;
+    renderShownVariant();
+}
+function paramSpecs() {
+    return state.params.map(p => Object.assign({ group: String(p.group || "").trim().toUpperCase() }, ScratchQ.Params.parseValues(p.values)));
+}
+/* the variants from the parameters (kept in the file: the same until the parameters change or "Other variants") */
+function makeVariants() {
+    const specs = paramSpecs();
+    if (!specs.length || specs.some(s => s.error)) { state.variants = []; }
+    else state.variants = ScratchQ.Params.makeVariants(specs, state.variantCount, state.variantSeed).variants;
+    if (shownVariant >= state.variants.length) shownVariant = 0;
+}
+function paramsChanged() {
+    makeVariants();
+    renderParams();
+    renderTraceMistakes();
+    renderAttempt(true);
+    changed();
+}
+$("paramsBox").addEventListener("change", e => {
+    const el = e.target;
+    if (el.dataset.pon) {
+        if (el.checked) {
+            const c = ScratchQ.Params.candidates(state.reference).find(x => x.block === el.dataset.pon);
+            /* first values: around the program's own number */
+            const v = c ? Number(c.value) : 1;
+            state.params.push({ block: el.dataset.pon, values: Math.max(0, v - 3) + ".." + (v + 3), group: "" });
+            state.params.sort((a, b) => blockRank(a.block) - blockRank(b.block));
+        } else state.params = state.params.filter(p => p.block !== el.dataset.pon);
+        paramsChanged();
+        return;
+    }
+    const p = state.params.find(x => x.block === (el.dataset.pvalues || el.dataset.pgroup));
+    if (!p) return;
+    if (el.dataset.pvalues) p.values = el.value.trim(); else p.group = el.value.trim().toUpperCase();
+    paramsChanged();
+});
+function blockRank(id) { return ScratchQ.Trace.blockOrder(state.reference).indexOf(id); }
+$("variantCount").addEventListener("change", () => {
+    state.variantCount = Math.max(1, Math.min(100, Math.round(Number($("variantCount").value) || 20)));
+    paramsChanged();
+});
+$("newVariants").onclick = () => { state.variantSeed = (Number(state.variantSeed) || 1) + 1; paramsChanged(); };
+function renderShownVariant() {
+    const n = state.variants.length;
+    $("shownVariantField").hidden = !randomValues();
+    $("shownVariant").innerHTML = state.variants.map((v, i) => "<option value=\"" + i + "\">" + (i + 1) + ": " + esc(variantText(v)) + "</option>").join("");
+    $("shownVariant").value = String(Math.min(shownVariant, Math.max(0, n - 1)));
+    $("traceShownVariant").textContent = randomValues() ? "(variant " + (shownVariant + 1) + ": " + variantText(state.variants[shownVariant]) + ")" : "";
+}
+function variantText(values) { return state.params.map((p, i) => paramName(p) + " = " + (values ? values[i] : "?")).join(", "); }
+$("shownVariant").addEventListener("change", () => {
+    shownVariant = Number($("shownVariant").value) || 0;
+    renderShownVariant();
+    renderAttempt(true);
+    scheduleChecks();
+});
+/* a trace answer as the teacher reads it */
+function traceItemText(it, value) {
+    if (it.kind === "say") return value.length ? "says:\n  " + ScratchQ.sayText(value, "", "\n  ") : "says: (nothing)";
+    if (it.kind === "var") return it.name + " = " + value;
+    if (it.kind === "branch") {
+        const b = ScratchQ.Trace.ifBlocks(state.reference).find(x => x.block === it.block);
+        return "if block no. " + (b ? b.number : "?") + ": " + ScratchQ.Trace.branchName("en", value).replace(/^The /, "the ");
+    }
+    return "list " + it.name + " = [" + value.join(", ") + "]";
+}
+
+/* trace: the teacher's mistakes - a wrong answer typed as the student would (only without random values) */
+function renderTraceMistakes() {
+    const box = $("traceMistakesBox");
+    const random = state.params.length > 0;
+    $("addTraceMistake").disabled = random;
+    $("traceMistakesHint").hidden = random;
+    if (random) {
+        box.innerHTML = "<p class=\"status warn\">The question has random values: a typed wrong answer fits only one set of values, so common mistakes are not used." +
+            (state.traceMistakes.length ? " The " + state.traceMistakes.length + " mistake(s) written before are kept in the file, not in the question." : "") + "</p>";
+        return;
+    }
+    if (!state.traceMistakes.length) { box.innerHTML = "<p class=\"hint\">No mistakes yet.</p>"; return; }
+    const ifs = ScratchQ.Trace.ifBlocks(state.reference);
+    box.innerHTML = state.traceMistakes.map((m, i) => {
+        const a = m.answers || {};
+        let fields = "";
+        state.trace.items.forEach(it => {
+            if (it.kind === "say") fields += "<label class=\"field\">What the sprite says, one line each ([10] Hello: ten times)<textarea data-tm=\"say\" data-i=\"" + i + "\" style=\"font:13px Consolas,monospace;direction:ltr;min-height:54px\">" + esc((a.say || []).join("\n")) + "</textarea></label>";
+            else if (it.kind === "var") fields += "<label class=\"field\">" + esc(it.name) + " =<input type=\"text\" data-tm=\"var\" data-name=\"" + esc(it.name) + "\" data-i=\"" + i + "\" style=\"direction:ltr\" value=\"" + esc((a.vars || {})[it.name] || "") + "\"></label>";
+            else if (it.kind === "list") fields += "<label class=\"field\">list " + esc(it.name) + " (items separated by commas)<input type=\"text\" data-tm=\"list\" data-name=\"" + esc(it.name) + "\" data-i=\"" + i + "\" style=\"direction:ltr\" value=\"" + esc(((a.lists || {})[it.name] || []).join(", ")) + "\"></label>";
+            else if (it.kind === "branch") {
+                const b = ifs.find(x => x.block === it.block);
+                const cur = (a.branches || {})[it.block] || "";
+                const opts = (b && b.ifElse ? ["if", "else"] : ["if", "none"]);
+                fields += "<label class=\"field\">if block no. " + (b ? b.number : "?") + "<select data-tm=\"branch\" data-block=\"" + esc(it.block) + "\" data-i=\"" + i + "\"><option value=\"\"></option>" +
+                    opts.map(v => "<option value=\"" + v + "\"" + (cur === v ? " selected" : "") + ">" + esc(ScratchQ.Trace.branchName("en", v)) + "</option>").join("") + "</select></label>";
+            }
+        });
+        return "<div class=\"card\"><div class=\"card-head\"><b>Mistake " + (i + 1) + "</b>" +
+            "<label class=\"field\" style=\"flex-direction:row;align-items:center;gap:6px\">Grade % <input type=\"number\" min=\"0\" max=\"100\" data-tm=\"score\" data-i=\"" + i + "\" value=\"" + (typeof m.score === "number" ? m.score : "") + "\" placeholder=\"fields\"></label>" +
+            "<button type=\"button\" class=\"small\" data-tmdel=\"" + i + "\">Remove</button></div>" +
+            "<div class=\"row\" style=\"align-items:flex-start\">" + fields + "</div>" +
+            "<div class=\"msg-grid\"><span>עברית</span><input type=\"text\" dir=\"rtl\" data-tm=\"he\" data-i=\"" + i + "\" value=\"" + esc((m.message || {}).he || "") + "\">" +
+            "<span>العربية</span><input type=\"text\" dir=\"rtl\" data-tm=\"ar\" data-i=\"" + i + "\" value=\"" + esc((m.message || {}).ar || "") + "\">" +
+            "<span>English</span><input type=\"text\" data-tm=\"en\" data-i=\"" + i + "\" value=\"" + esc((m.message || {}).en || "") + "\"></div>" +
+            "<div class=\"status\" id=\"traceMistakeStatus" + i + "\"></div></div>";
+    }).join("");
+}
+function readTraceMistake(e) {
+    const el = e.target, i = Number(el.dataset.i), m = state.traceMistakes[i];
+    if (!m || !el.dataset.tm) return;
+    const a = m.answers = Object.assign({ say: [], vars: {}, lists: {}, branches: {} }, m.answers || {});
+    switch (el.dataset.tm) {
+        case "say": a.say = el.value.split("\n").map(s => s.trim()).filter(s => s !== ""); break;
+        case "var": a.vars[el.dataset.name] = el.value.trim(); break;
+        case "list": a.lists[el.dataset.name] = el.value.split(",").map(s => s.trim()).filter(s => s !== ""); break;
+        case "branch": a.branches[el.dataset.block] = el.value; break;
+        case "score": m.score = el.value === "" ? null : Math.max(0, Math.min(100, Number(el.value))); break;
+        default: m.message = m.message || {}; m.message[el.dataset.tm] = el.value;
+    }
+    changed();
+}
+$("traceMistakesBox").addEventListener("input", readTraceMistake);
+$("traceMistakesBox").addEventListener("change", readTraceMistake);
+$("traceMistakesBox").addEventListener("click", e => {
+    const d = e.target.dataset && e.target.dataset.tmdel;
+    if (d === undefined) return;
+    state.traceMistakes.splice(Number(d), 1);
+    renderTraceMistakes();
+    changed();
+});
+/* a new mistake starts from the correct answer: the teacher changes what the student gets wrong */
+$("addTraceMistake").onclick = async () => {
+    const exp = await ScratchQ.Checker.traceExpected(checkConfig());
+    state.traceMistakes.push({ answers: traceAnswers(exp), message: { he: "", ar: "", en: "" }, score: null });
+    renderTraceMistakes();
+    changed();
+};
+/* the expected answer of a trace run as the student's answers */
+function traceAnswers(exp) {
+    const answers = { say: [], vars: {}, lists: {}, branches: {} };
+    exp.items.forEach(it => {
+        if (it.kind === "say") answers.say = ScratchQ.sayLines(it.value);
+        else if (it.kind === "var") answers.vars[it.name] = String(it.value);
+        else if (it.kind === "branch") answers.branches[it.block] = it.value;
+        else answers.lists[it.name] = it.value.map(String);
+    });
+    return answers;
+}
 $("traceTestBox").addEventListener("input", e => { if (readTestField(e)) changed(); });
 $("traceTestBox").addEventListener("change", e => { if (readTestField(e)) changed(); });
 
 /* the student attempt: an editor as the student's (program) or the answer form (trace), graded live */
-let attemptProgram = null, attemptSeq = 0;
+let attemptProgram = null, attemptTrace = null, attemptSeq = 0;   // the attempt: the program, or the trace answers (saved state)
 function renderAttempt(reset) {
     const host = $("attemptHost");
     const mine = ++attemptSeq;
     if (editors.attempt) { try { editors.attempt.dispose(); } catch (e) { /* gone */ } editors.attempt = null; }
     host.textContent = "";
     $("attemptResult").textContent = "";
-    if (reset) attemptProgram = null;
+    if (reset) { attemptProgram = null; attemptTrace = null; }
     if (state.kind === "trace") {
-        ScratchQ.Question.mount(host, Object.assign(checkConfig(), { review: {} }), {
-            onChange: (st, score) => showAttemptResult(st ? { grade: st.grade, feedback: st.feedback } : null)
+        /* without reset (e.g. only a weight changed) the typed answers stay, graded again with the new settings */
+        const cfg = Object.assign(checkConfig(), { review: {} });
+        ScratchQ.Question.mount(host, cfg, {
+            state: attemptTrace,
+            onChange: (st, score) => { attemptTrace = st; showAttemptResult(st ? { grade: st.grade, feedback: st.feedback } : null); }
         });
+        if (attemptTrace && attemptTrace.answers) {
+            ScratchQ.Checker.gradeTrace(cfg, attemptTrace.answers, cfg.language).then(g => {
+                if (mine !== attemptSeq) return;
+                attemptTrace = Object.assign({}, attemptTrace, { grade: g.grade, feedback: g.feedback });
+                showAttemptResult({ grade: g.grade, feedback: g.feedback });
+            });
+        }
         return;
     }
     const box = document.createElement("div");
@@ -974,15 +1242,85 @@ async function runChecks() {
 
     if (state.kind === "trace") {
         if (!state.trace.items.length) found.checker.push(["bad", "Choose at least one thing the student answers (tab 2)."]);
+        else if (state.trace.items.every(it => it.weight === 0)) found.checker.push(["warn", "Every item has weight 0: all count the same (tab 2)."]);
+        if (usesRandom(state.reference)) found.checker.push(["bad", "The program uses \"pick random\": the student cannot know which numbers it gives. Use random values in set blocks instead (tab 2, Random values)."]);
+        renderShownVariant();
         const exp = has ? await ScratchQ.Checker.traceExpected(q) : null;
         if (mine !== checkSeq) return;
         if (exp) {
-            const lines = exp.items.map(it => it.kind === "say" ? (it.value.length ? "says:\n  " + ScratchQ.sayText(it.value, "", "\n  ") : "says: (nothing)")
-                : (it.kind === "var" ? it.name + " = " + it.value : "list " + it.name + " = [" + it.value.join(", ") + "]"));
+            const lines = exp.items.map(it => traceItemText(it, it.value));
             if (exp.status !== "done") { lines.unshift(exp.status === "timeout" ? "⚠ The program did not stop." : "⚠ The run did not finish (" + exp.status + ")."); found.checker.push(["bad", "The program does not finish its run."]); }
             $("traceExpected").textContent = lines.join("\n");
             $("traceExpected").className = "expected" + (exp.status !== "done" ? " bad" : "");
         } else $("traceExpected").textContent = "";
+        /* the random values: every variant's correct answer */
+        const specs = paramSpecs();
+        specs.forEach((s, i) => { if (s.error) found.checker.push(["bad", "Random values of " + paramName(state.params[i]) + ": " + s.error + "."]); });
+        const st = $("variantsStatus");
+        st.className = "status"; st.textContent = "";
+        $("variantsTable").innerHTML = "";
+        if (state.params.length && !specs.some(s => s.error)) {
+            const groups = {};
+            specs.forEach(s => { if (s.group) groups[s.group] = (groups[s.group] || 0) + 1; });
+            const made = ScratchQ.Params.makeVariants(specs, state.variantCount, state.variantSeed);
+            if (!state.variants.length) {
+                st.className = "status bad";
+                st.textContent = "⚠ No variant: the values cannot be given" + (Object.keys(groups).length ? " - a group has fewer values than parameters." : ".");
+                found.checker.push(["bad", "The random values give no variant."]);
+            } else if (has) {
+                const answers = [];
+                for (let i = 0; i < state.variants.length; i += 1) answers.push(await ScratchQ.Checker.traceExpected(checkConfig(i)));
+                if (mine !== checkSeq) return;
+                const keys = answers.map(a => JSON.stringify(a.items.map(it => it.value)));
+                const differentAnswers = new Set(keys).size;
+                let html = "<tr><th>#</th><th>The values</th><th>The correct answer</th></tr>";
+                answers.forEach((a, i) => {
+                    const notes = [];
+                    if (a.status !== "done") notes.push("⚠ the run does not finish (" + a.status + ")");
+                    a.items.forEach(it => {
+                        const b = it.kind === "branch" && state.reference.blocks[it.block];
+                        if (b && b.opcode === "control_if_else" && it.value === "none") notes.push("⚠ the if block does not run");
+                    });
+                    if (notes.length) found.checker.push(["bad", "Variant " + (i + 1) + ": " + notes.join("; ").replace(/⚠ /g, "") + "."]);
+                    html += "<tr><td>" + (i + 1) + "</td><td class=\"mono\">" + esc(variantText(state.variants[i])) + "</td><td class=\"mono\">" +
+                        esc((notes.length ? notes.join("\n") + "\n" : "") + a.items.map(it => traceItemText(it, it.value)).join("\n")) + "</td></tr>";
+                });
+                $("variantsTable").innerHTML = html;
+                st.className = "status info";
+                st.textContent = state.variants.length + " variants" + (made.possible !== null && made.possible <= state.variantCount ? " - all the possible ones" : "") +
+                    "; " + differentAnswers + " different correct " + (differentAnswers === 1 ? "answer" : "answers") + ".";
+                if (differentAnswers === 1 && state.variants.length > 1) {
+                    st.className = "status warn";
+                    st.textContent += " ⚠ Every variant has the same answer: the random values change nothing the student answers.";
+                    found.checker.push(["warn", "Every variant has the same correct answer."]);
+                }
+            }
+        }
+        /* the teacher's mistakes (no random values): equal to the correct answer, or to an earlier mistake */
+        if (exp && !state.params.length) {
+            const cfgM = checkConfig();
+            for (let i = 0; i < state.traceMistakes.length; i += 1) {
+                const m = state.traceMistakes[i];
+                /* the mistake's answer graded as a student's: the correct answer, or caught by an earlier mistake */
+                const g = await ScratchQ.Checker.gradeTrace(cfgM, m.answers, "en");
+                if (mine !== checkSeq) return;
+                const el = $("traceMistakeStatus" + i);
+                if (g.marks.every(Boolean)) {
+                    if (el) { el.className = "status bad"; el.textContent = "⚠ This is the correct answer - not a mistake. Change what the student gets wrong."; }
+                    found.didactics.push(["bad", "Mistake " + (i + 1) + " is the correct answer."]);
+                } else if (g.mistake !== null && g.mistake !== i) {
+                    if (el) { el.className = "status warn"; el.textContent = "⚠ The same answer as mistake " + (g.mistake + 1) + ", which comes first - this one is never used."; }
+                    found.didactics.push(["warn", "Mistake " + (i + 1) + " is caught by mistake " + (g.mistake + 1) + "."]);
+                } else if (el) {
+                    /* the grade without the mistake's own score: the weighted credits */
+                    const tw = g.weights.reduce((s, w) => s + w, 0);
+                    const share = Math.round(100 * g.scores.reduce((s, v, k) => s + v * g.weights[k], 0) / tw);
+                    el.className = "status info";
+                    el.textContent = g.marks.filter(Boolean).length + " of " + g.marks.length + " fields are correct (" + share + "%); the grade: " + (typeof m.score === "number" ? m.score + "% (yours)" : share + "%") + ".";
+                }
+                if (!Object.values(m.message || {}).some(s => s && s.trim())) found.didactics.push(["warn", "Mistake " + (i + 1) + " has no message."]);
+            }
+        }
     } else {
         if (state.observe.say === false && !state.observe.pen && !state.observe.vars.length && !state.observe.lists.length) found.checker.push(["bad", "Nothing is checked: choose what is checked (tab 2)."]);
         if (!(state.palette.blocks || []).length) found.palette.push(["warn", "The palette is empty: the student can only use the blocks of the starting program."]);
@@ -1076,10 +1414,11 @@ function renderFileTab() {
         ["Question", (s.question.questionId || "") + " - " + (s.kind === "trace" ? "trace (write the outcome)" : "program (complete / fix / write)")],
         ["Student language", s.language],
         ["Reference", Object.values(s.reference.blocks || {}).filter(b => !Array.isArray(b) && !b.shadow).length + " blocks; variables: " + (varNames(s.reference).join(", ") || "none") + "; lists: " + (listNames(s.reference).join(", ") || "none")],
-        ["Tests", s.kind === "trace" ? "one run" : s.tests.length + " (" + s.tests.filter(t => t.hidden).length + " hidden)"],
+        ["Tests", s.kind === "trace" ? "one run" + ((s.tests[0] && s.tests[0].answers || []).length ? "; answers to \"ask\": " + s.tests[0].answers.join(", ") : "") : s.tests.length + " (" + s.tests.filter(t => t.hidden).length + " hidden)"],
         ["Starting program", s.initial ? Object.values(s.initial.blocks || {}).filter(b => !Array.isArray(b) && !b.shadow).length + " blocks, " + Object.keys(s.locks || {}).length + " locked" : "none (an empty workspace)"],
-        ["Mistakes", String(s.mistakes.length)]
+        ["Mistakes", String(s.kind === "trace" ? (s.params.length ? 0 : s.traceMistakes.length) : s.mistakes.length)]
     ];
+    if (s.kind === "trace") rows.splice(4, 1, ["Random values", s.params.length ? s.params.map(p => paramName(p) + ": " + p.values + (p.group ? " (group " + p.group + ")" : "")).join("; ") + " - " + s.variants.length + " variants" : "none"]);
     $("fileSummary").innerHTML = rows.map(r => "<tr><td>" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td></tr>").join("");
     $("fileJson").value = fileText();
 }
@@ -1089,6 +1428,10 @@ function loadState(s, name, handle) {
     const d = defaultState();
     state = Object.assign(d, s || {});
     state.question = Object.assign(defaultState().question, (s && s.question) || {});
+    /* made before part numbers: its STACK variable stays "sqmodel" (the question in Moodle uses that name) */
+    if (s && s.question && s.question.part === undefined) state.question.part = "";
+    ["params", "variants", "traceMistakes"].forEach(k => { if (!Array.isArray(state[k])) state[k] = []; });
+    shownVariant = 0;
     state.question.review = Object.assign({ grade: true, feedback: true, reference: true }, state.question.review || {});
     state.observe = Object.assign(defaultState().observe, state.observe || {});
     state.trace = Object.assign({ items: [{ kind: "say" }] }, state.trace || {});
@@ -1102,14 +1445,18 @@ function loadState(s, name, handle) {
 
 /* the question code -> the exercise: cfg.exercise holds the builder's settings, cfg itself the programs */
 function stateFromCode(text) {
-    const m = /ScratchQ\.Question\.mountStackJs\(stack_js,(\{.*\})\);\[\[\/script\]\]/.exec(text) || /^var CONFIG = (\{.*\});$/m.exec(text);
+    /* STACK: mountStackJs(stack_js,{...}) or, with random values, mountStackJs(stack_js,{...},{#sqvar1#}) */
+    const m = /ScratchQ\.Question\.mountStackJs\(stack_js,(\{.*\})(?:,\{#\w+#\})?\);\[\[\/script\]\]/.exec(text) || /^var CONFIG = (\{.*\});$/m.exec(text);
     if (!m) return null;
     const cfg = JSON.parse(m[1]);
     if (!cfg || cfg.tool !== QUESTION_TOOL || !cfg.exercise) throw new Error("This is not the code of a Scratch question.");
     const ex = cfg.exercise;
     ex.reference = cfg.reference;
     ex.initial = cfg.initial || null;
-    ex.mistakes = cfg.mistakes || [];
+    if (cfg.kind === "trace") {
+        if (!ex.traceMistakes) ex.traceMistakes = cfg.mistakes || [];
+        if (cfg.variants) ex.variants = cfg.variants;
+    } else ex.mistakes = cfg.mistakes || [];
     return ex;
 }
 function openText(text, name, handle) {
@@ -1258,6 +1605,8 @@ function readQuestionSettings() {
     /* it goes into an HTML comment and a title: no < > & " [ ] { } and no -- */
     q.questionId = $("questionId").value.trim().replace(/[<>&"\[\]{}]/g, "").replace(/-{2,}/g, "-") || "scratch1";
     q.inputs = { score: $("inputScore").value.trim() || "ans1", state: $("inputState").value.trim() || "ans2" };
+    /* the part number goes into STACK variable names: letters and digits only */
+    q.part = $("questionPart").value.trim().replace(/[^A-Za-z0-9]/g, "");
     q.review = { grade: $("reviewGrade").checked, feedback: $("reviewFeedback").checked, reference: $("reviewReference").checked };
     q.libraryUrl = $("libraryUrl").value.trim() || DEFAULT_LIBRARY;
     q.debug = $("debugLogs").checked;
@@ -1269,6 +1618,7 @@ function writeQuestionSettings() {
     $("questionId").value = q.questionId;
     $("inputScore").value = q.inputs.score;
     $("inputState").value = q.inputs.state;
+    $("questionPart").value = q.part || "";
     $("reviewGrade").checked = q.review.grade !== false;
     $("reviewFeedback").checked = q.review.feedback !== false;
     $("reviewReference").checked = q.review.reference !== false;
@@ -1285,14 +1635,18 @@ function questionConfig() {
         review: q.review, reference: c.reference, height: state.height };
     if (q.target === "stack") cfg.inputs = q.inputs;
     if (q.debug === true) cfg.debug = true;
-    if (state.kind === "trace") { cfg.tests = c.tests.slice(0, 1); cfg.trace = c.trace; }
-    else {
+    const ex = clone(state);
+    delete ex.reference; delete ex.initial;                               // in cfg already - restored on open
+    if (state.kind === "trace") {
+        cfg.tests = c.tests.slice(0, 1); cfg.trace = c.trace;
+        if (c.params) { cfg.params = c.params; cfg.variants = c.variants; delete ex.variants; }
+        if (c.mistakes.length) { cfg.mistakes = c.mistakes; delete ex.traceMistakes; }
+    } else {
         cfg.initial = c.initial; cfg.locks = c.locks; cfg.palette = c.palette; cfg.tests = c.tests; cfg.observe = c.observe;
         if (c.observe.pen) cfg.drawing = c.drawing;
         if (c.mistakes.length) cfg.mistakes = c.mistakes;
+        delete ex.mistakes;
     }
-    const ex = clone(state);
-    delete ex.reference; delete ex.initial; delete ex.mistakes;           // in cfg already - restored on open
     cfg.exercise = ex;
     return cfg;
 }
@@ -1341,7 +1695,8 @@ function stackCode(cfg) {
         "<div id=\"scratchq\"></div>",
         "[[script type=\"module\"]]",
         "import {stack_js} from '[[cors src=\"stackjsiframe.js\"/]]';",
-        "ScratchQ.Question.mountStackJs(stack_js," + codeJson(cfg) + ");",
+        /* random values: STACK puts the student's variant number in (a question variable, made by this builder) */
+        "ScratchQ.Question.mountStackJs(stack_js," + codeJson(cfg) + (cfg.variants ? ",{#" + stackVar("sqvar") + "#}" : "") + ");",
         "[[/script]]",
         "[[/iframe]]"
     ].join("");
@@ -1379,6 +1734,8 @@ function htmlCode(cfg) {
         " *                     (null: no answer) - store it; score 0 to 1",
         " */",
         "var CONFIG = " + json + ";",
+        "/* random values: a variant picked when the page opens */",
+        "if (CONFIG.variants) CONFIG.variant = Math.floor(Math.random() * CONFIG.variants.length);",
         "var TEXT = {he:{submit:\"הגשה\",again:\"ניסיון נוסף\"}, ar:{submit:\"إرسال\",again:\"محاولة أخرى\"}, en:{submit:\"Submit\",again:\"Try again\"}};",
         "var words = TEXT[document.documentElement.lang] || TEXT.en;",
         "var box = document.getElementById(\"question\"), submit = document.getElementById(\"submit\"), again = document.getElementById(\"again\");",
@@ -1400,19 +1757,32 @@ function htmlCode(cfg) {
     ].join("\n");
 }
 
-/* the state input's model answer: the reference as a whole saved state (Moodle's "Fill in correct responses") */
-async function modelState() {
+/* the state input's model answer: the reference as a whole saved state (Moodle's "Fill in correct responses");
+   variant: of a question with random values (each variant has its own) */
+async function modelState(variant) {
     if (state.kind === "trace") {
-        const exp = await ScratchQ.Checker.traceExpected(checkConfig());
-        const answers = { say: [], vars: {}, lists: {} };
-        exp.items.forEach(it => {
-            if (it.kind === "say") answers.say = it.value.slice();
-            else if (it.kind === "var") answers.vars[it.name] = String(it.value);
-            else answers.lists[it.name] = it.value.map(String);
-        });
-        return { v: 1, answers, grade: 100, feedback: "" };
+        const exp = await ScratchQ.Checker.traceExpected(checkConfig(variant));
+        const st = { v: 1, answers: traceAnswers(exp), grade: 100, feedback: ScratchQ.tr(uiLanguage(), "traceCorrect") };
+        if (exp.variant !== undefined) st.variant = exp.variant;
+        return st;
     }
     return { v: 1, program: state.reference, grade: 100, feedback: "" };
+}
+/* a STACK variable's name with the part number: sqmodel1, sqvar1 (a file made before part numbers: sqmodel) */
+function stackVar(base) { return base + String(state.question.part || ""); }
+/*
+ * The question variables, ready to paste: the model answer; with random values also the variant number - one model
+ * answer per variant, STACK picks the student's (so "Fill in correct responses" fits the student's values).
+ */
+async function questionVariables() {
+    const model = stackVar("sqmodel");
+    if (!randomValues()) return model + ": \"" + ScratchQ.encodeState(await modelState()) + "\";";
+    const all = [];
+    for (let i = 0; i < state.variants.length; i += 1) all.push("\"" + ScratchQ.encodeState(await modelState(i)) + "\"");
+    const v = stackVar("sqvar");
+    return v + ": rand(" + state.variants.length + ");\n" +
+        stackVar("sqmodels") + ": [" + all.join(", ") + "];\n" +
+        model + ": " + stackVar("sqmodels") + "[" + v + " + 1];";
 }
 
 function stackHelpHtml() {
@@ -1421,7 +1791,7 @@ function stackHelpHtml() {
         "<code>[[input:ans1]] [[validation:ans1]]</code> and do <b>not</b> add the inputs again. Then set each input in its section of the question form:</p>" +
         "<table><tr><th></th><th>" + s + " - the score</th><th>" + t + " - the saved answer</th></tr>" +
         "<tr><td>Input type</td><td>Numerical</td><td>String</td></tr>" +
-        "<tr><td>Model answer</td><td><code>1</code></td><td><code>" + STACK_MODEL_VAR + "</code> - from the question variables (below)</td></tr>" +
+        "<tr><td>Model answer</td><td><code>1</code></td><td><code>" + esc(stackVar(STACK_MODEL_VAR)) + "</code> - from the question variables (below)</td></tr>" +
         "<tr><td>Forbid float</td><td>No</td><td>-</td></tr>" +
         "<tr><td>Student must verify</td><td>No</td><td>No</td></tr>" +
         "<tr><td>Show the validation</td><td><b>No</b></td><td><b>No</b></td></tr>" +
@@ -1429,8 +1799,13 @@ function stackHelpHtml() {
         "<p><b>The potential response tree (PRT).</b> " + s + " holds the score from 0 to 1, and the PRT gives it as the mark: one node - SAns <code>" + s +
         "</code>, TAns <code>1</code>, answer test <code>AlgEquiv</code>; true branch: score <code>1</code>; false branch: score <code>" + s + "</code>. " + t +
         " needs no PRT: STACK saves it and the question reads it back. The saved answer is <code>sq1:</code> followed by letters and digits (base64), so STACK accepts it however long the program is.</p>" +
-        "<p><b>Question variables.</b> Paste the line below into the question's <i>Question variables</i>. It is the correct answer as the question saves it, so " +
-        "Moodle's <i>Fill in correct responses</i> shows it. Copy it again after a change of the reference.</p>" +
+        (randomValues()
+            ? "<p><b>Question variables.</b> Paste the lines below into the question's <i>Question variables</i>. <code>" + esc(stackVar("sqvar")) + "</code> picks the student's variant (one of " +
+              state.variants.length + "); the code gives it to the question, and <code>" + esc(stackVar("sqmodel")) + "</code> is that variant's correct answer, so Moodle's <i>Fill in correct responses</i> " +
+              "fits the student's values. Copy them again after any change of the program, the random values or the variants.</p>"
+            : "<p><b>Question variables.</b> Paste the line below into the question's <i>Question variables</i>. It is the correct answer as the question saves it, so " +
+              "Moodle's <i>Fill in correct responses</i> shows it. Copy it again after a change of the reference.</p>") +
+        "<p><b>Two Scratch questions in one STACK question:</b> give them part numbers 1 and 2 (Settings, above) and other inputs (e.g. ans1 / ans2 and ans3 / ans4); paste both codes into the question text and both sets of question variables.</p>" +
         "<p><b>The library folder</b> must hold scratchq.js, scratchq-editor.js and scratchq-question.js. The Scratch VM (scratch-vm 4.8.115, ~5.7 MB, loaded once and cached) " +
         "and scratch-blocks come from jsDelivr.</p>";
 }
@@ -1450,6 +1825,14 @@ function startTry(readOnly) {
     const host = $("tryHost");
     host.textContent = "";
     const cfg = questionConfig();
+    /* random values: the student's variant, as STACK would give it */
+    $("tryVariantField").hidden = !cfg.variants;
+    if (cfg.variants) {
+        const keep = Number($("tryVariant").value) || 0;
+        $("tryVariant").innerHTML = cfg.variants.map((v, i) => "<option value=\"" + i + "\">" + (i + 1) + ": " + esc(variantText(v)) + "</option>").join("");
+        $("tryVariant").value = String(Math.min(keep, cfg.variants.length - 1));
+        cfg.variant = Number($("tryVariant").value) || 0;
+    }
     ScratchQ.Question.mount(host, cfg, {
         state: trySaved, readOnly: readOnly,
         onChange: (st, score) => { trySaved = st ? ScratchQ.encodeState(st) : null; $("tryState").value = trySaved ? trySaved + "\n(score " + ScratchQ.Question.scoreText(score) + ")" : ""; }
@@ -1470,8 +1853,9 @@ async function renderQuestionTab(restart) {
         : "A complete web page: the question with Submit / Try again. Save it as an .html file; write the question text where the page says so.";
     $("stackHelp").innerHTML = stackHelpHtml();
     renderIssues();
-    try { $("modelVar").value = STACK_MODEL_VAR + ": \"" + ScratchQ.encodeState(await modelState()) + "\";"; }
+    try { $("modelVar").value = await questionVariables(); }
     catch (e) { $("modelVar").value = ""; }
+    $("modelVar").style.height = randomValues() ? "140px" : "70px";
     if (restart) { trySaved = null; $("tryState").value = ""; startTry(false); }
 }
 let qTimer = null;
@@ -1480,8 +1864,9 @@ $("tabQuestion").addEventListener("input", e => {
     clearTimeout(qTimer);
     qTimer = setTimeout(() => { readQuestionSettings(); changed(); renderQuestionTab(false); }, 250);
 });
+$("tryVariant").addEventListener("change", () => { trySaved = null; $("tryState").value = ""; startTry(false); });
 $("tabQuestion").addEventListener("change", e => {
-    if (e.target.closest("#tryHost")) return;
+    if (e.target.closest("#tryHost") || e.target.id === "tryVariant") return;
     readQuestionSettings(); changed(); renderQuestionTab(false);
 });
 function copyText(text, msgId) {
@@ -1510,6 +1895,9 @@ async function renderAll() {
     renderObserve();
     renderTests();
     renderTraceSection();
+    if (state.params.length && !state.variants.length) makeVariants();
+    renderParams();
+    renderTraceMistakes();
     renderFileState();
     Object.keys(editors).forEach(k => { try { editors[k].dispose(); } catch (e) { /* gone */ } delete editors[k]; });
     const [ref, init] = await Promise.all([
@@ -1536,7 +1924,7 @@ async function renderAll() {
     currentTab = preference("tab") || "checker";
     loadState(null, "", null);
     /* the test hook (tests/builder-tests.js) */
-    window.builder = { get state() { return state; }, isDirty: () => dirty, editors, showTab, loadState, runChecks, questionConfig, stackCode, htmlCode, openText, fileText, modelState, issues };
+    window.builder = { get state() { return state; }, isDirty: () => dirty, editors, showTab, loadState, runChecks, questionConfig, stackCode, htmlCode, openText, fileText, modelState, questionVariables, checkConfig, issues };
     if (/[?&]selftest/.test(location.search)) {
         const s = document.createElement("script");
         s.src = "tests/builder-tests.js";
